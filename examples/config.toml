@@ -4,11 +4,3 @@
 # Path to the real system sudo binary. Keep this absolute to avoid recursion
 # if `sudo` is aliased or shimmed to `supersudo`.
 real_sudo = "/usr/bin/sudo"
-
-[prompt]
-# Not used yet by the wrapper, but this is the planned prompt template shape.
-template = "🔐 Password for {user}@{host} to run {command}: "
-
-[ui]
-# Not used yet by the wrapper.
-enabled = true

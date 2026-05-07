@@ -32,12 +32,12 @@ fn main() {
         }
     };
 
-    // Later, customization will happen before this point:
-    // - inspect invocation.sudo_args to build template variables
-    // - render loaded_config.config.prompt.template
-    // - add `-p <prompt>` when appropriate
-    // For now we are intentionally transparent: pass every sudo argument through.
-    let err = Command::new(&real_sudo).args(invocation.sudo_args).exec();
+    // Later, this empty prompt will be replaced with the rendered supersudo prompt.
+    // For now, we suppress sudo's default `[sudo] password for user:` prompt unless
+    // the user explicitly provided their own sudo prompt via `-p` / `--prompt`.
+    let sudo_args = with_default_empty_prompt(invocation.sudo_args);
+
+    let err = Command::new(&real_sudo).args(sudo_args).exec();
 
     // Only reached if exec failed.
     eprintln!(
@@ -84,6 +84,44 @@ fn parse_supersudo_args() -> Result<Invocation, String> {
         config_path,
         sudo_args,
     })
+}
+
+fn with_default_empty_prompt(args: Vec<String>) -> Vec<String> {
+    if has_sudo_prompt_arg(&args) {
+        return args;
+    }
+
+    let mut prompted_args = Vec::with_capacity(args.len() + 2);
+    prompted_args.push("-p".to_string());
+    prompted_args.push(String::new());
+    prompted_args.extend(args);
+    prompted_args
+}
+
+fn has_sudo_prompt_arg(args: &[String]) -> bool {
+    let mut end_of_sudo_options = false;
+
+    for arg in args {
+        if end_of_sudo_options {
+            continue;
+        }
+
+        if arg == "--" {
+            end_of_sudo_options = true;
+            continue;
+        }
+
+        if arg == "-p" || arg == "--prompt" || arg.starts_with("--prompt=") {
+            return true;
+        }
+
+        // sudo accepts short options with attached values, e.g. `-pPassword:`.
+        if arg.starts_with("-p") && arg.len() > 2 {
+            return true;
+        }
+    }
+
+    false
 }
 
 fn find_real_sudo(configured_path: Option<&Path>) -> Result<PathBuf, String> {
