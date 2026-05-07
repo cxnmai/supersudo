@@ -18,7 +18,13 @@ pub fn render_display_at(
     extra_vars: &HashMap<String, String>,
     elapsed_ms: u128,
 ) -> Result<String, String> {
-    render_named_template(&config.display.template, config, sudo_args, extra_vars, elapsed_ms)
+    render_named_template(
+        &config.display.template,
+        config,
+        sudo_args,
+        extra_vars,
+        elapsed_ms,
+    )
 }
 
 pub fn render_error_display_at(
@@ -147,7 +153,10 @@ fn hostname() -> String {
 fn shell_join(args: &[String]) -> String {
     args.iter()
         .map(|arg| {
-            if arg.chars().all(|c| c.is_ascii_alphanumeric() || "@%_+=:,./-".contains(c)) {
+            if arg
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || "@%_+=:,./-".contains(c))
+            {
                 arg.clone()
             } else {
                 format!("'{}'", arg.replace('\'', "'\\''"))
@@ -197,7 +206,9 @@ fn render_template(
         } else if let Some(value) = render_value_token(&token, vars)? {
             out.push_str(&value);
         } else {
-            return Err(format!("unknown variable `{{{token}}}` in display template"));
+            return Err(format!(
+                "unknown variable `{{{token}}}` in display template"
+            ));
         }
     }
 

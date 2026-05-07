@@ -34,11 +34,11 @@ fn main() {
         }
     };
 
-    if loaded_config.config.input.mode != config::InputMode::Custom {
-        if let Err(err) = render::render_pre_prompt(&loaded_config.config, &invocation.sudo_args) {
-            eprintln!("supersudo: {err}");
-            std::process::exit(2);
-        }
+    if loaded_config.config.input.mode != config::InputMode::Custom
+        && let Err(err) = render::render_pre_prompt(&loaded_config.config, &invocation.sudo_args)
+    {
+        eprintln!("supersudo: {err}");
+        std::process::exit(2);
     }
 
     let display_args = invocation.sudo_args.clone();
@@ -47,24 +47,45 @@ fn main() {
     if loaded_config.config.input.mode == config::InputMode::Custom {
         match auth::credentials_are_cached(&real_sudo) {
             Ok(true) => {
-                if let Err(err) = render::render_authenticated_display(&loaded_config.config, &display_args) {
+                if let Err(err) =
+                    render::render_authenticated_display(&loaded_config.config, &display_args)
+                {
                     eprintln!("supersudo: {err}");
                     std::process::exit(2);
                 }
             }
             Ok(false) => {
-                let render_password_ui = |password_feedback: &str, state: auth::PromptState, message: &str, elapsed_ms: u128| {
-                    let mut extra = std::collections::HashMap::new();
-                    extra.insert("password".to_string(), password_feedback.to_string());
-                    extra.insert("error".to_string(), message.to_string());
-                    extra.insert("success".to_string(), message.to_string());
-                    match state {
-                        auth::PromptState::Normal => render::render_display_at(&loaded_config.config, &display_args, &extra, elapsed_ms),
-                        auth::PromptState::Error => render::render_error_display_at(&loaded_config.config, &display_args, &extra, elapsed_ms),
-                        auth::PromptState::Success => render::render_success_display_at(&loaded_config.config, &display_args, &extra, elapsed_ms)
+                let render_password_ui =
+                    |password_feedback: &str,
+                     state: auth::PromptState,
+                     message: &str,
+                     elapsed_ms: u128| {
+                        let mut extra = std::collections::HashMap::new();
+                        extra.insert("password".to_string(), password_feedback.to_string());
+                        extra.insert("error".to_string(), message.to_string());
+                        extra.insert("success".to_string(), message.to_string());
+                        match state {
+                            auth::PromptState::Normal => render::render_display_at(
+                                &loaded_config.config,
+                                &display_args,
+                                &extra,
+                                elapsed_ms,
+                            ),
+                            auth::PromptState::Error => render::render_error_display_at(
+                                &loaded_config.config,
+                                &display_args,
+                                &extra,
+                                elapsed_ms,
+                            ),
+                            auth::PromptState::Success => render::render_success_display_at(
+                                &loaded_config.config,
+                                &display_args,
+                                &extra,
+                                elapsed_ms,
+                            )
                             .map(|maybe| maybe.unwrap_or_default()),
-                    }
-                };
+                        }
+                    };
 
                 if let Err(err) = auth::authenticate_custom(
                     &real_sudo,
@@ -196,10 +217,10 @@ fn find_real_sudo(configured_path: Option<&Path>) -> Result<PathBuf, String> {
             continue;
         }
 
-        if let (Some(current), Ok(candidate_real)) = (&current_exe, path.canonicalize()) {
-            if &candidate_real == current {
-                continue;
-            }
+        if let (Some(current), Ok(candidate_real)) = (&current_exe, path.canonicalize())
+            && &candidate_real == current
+        {
+            continue;
         }
 
         return Ok(path);
@@ -229,14 +250,13 @@ fn validate_sudo_path(path: &Path, source: &str) -> Result<(), String> {
 }
 
 fn reject_self_reference(path: &Path, source: &str) -> Result<(), String> {
-    if let (Ok(current), Ok(candidate)) = (env::current_exe(), path.canonicalize()) {
-        if let Ok(current) = current.canonicalize() {
-            if current == candidate {
-                return Err(format!(
-                    "{source} points back to supersudo; refusing to recurse"
-                ));
-            }
-        }
+    if let (Ok(current), Ok(candidate)) = (env::current_exe(), path.canonicalize())
+        && let Ok(current) = current.canonicalize()
+        && current == candidate
+    {
+        return Err(format!(
+            "{source} points back to supersudo; refusing to recurse"
+        ));
     }
 
     Ok(())

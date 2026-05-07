@@ -64,20 +64,15 @@ impl Default for InputConfig {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum InputMode {
+    #[default]
     Sudo,
     Custom,
 }
 
-impl Default for InputMode {
-    fn default() -> Self {
-        Self::Sudo
-    }
-}
-
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Default, Deserialize)]
 pub struct DisplayConfig {
     pub enabled: bool,
     #[serde(default)]
@@ -89,22 +84,6 @@ pub struct DisplayConfig {
     pub success_template_file: Option<PathBuf>,
     pub authenticated_template: Option<String>,
     pub authenticated_template_file: Option<PathBuf>,
-}
-
-impl Default for DisplayConfig {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            template: String::new(),
-            template_file: None,
-            error_template: None,
-            error_template_file: None,
-            success_template: None,
-            success_template_file: None,
-            authenticated_template: None,
-            authenticated_template_file: None,
-        }
-    }
 }
 
 #[derive(Debug)]
@@ -219,7 +198,11 @@ fn load_external_templates(config: &mut Config, config_path: &Path) -> Result<()
     Ok(())
 }
 
-fn read_template_file(config_path: &Path, template_path: &Path, field: &str) -> Result<String, String> {
+fn read_template_file(
+    config_path: &Path,
+    template_path: &Path,
+    field: &str,
+) -> Result<String, String> {
     let path = if template_path.is_absolute() {
         template_path.to_path_buf()
     } else {
