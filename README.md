@@ -53,6 +53,11 @@ Show help:
 ```bash
 supersudo --help
 ```
+## Installation
+
+```bash
+cargo install --git https://github.com/cxnmai/supersudo.git
+```
 
 ## Commands
 
