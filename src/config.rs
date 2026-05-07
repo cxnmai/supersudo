@@ -1,6 +1,7 @@
 #![allow(dead_code)]
 
 use serde::Deserialize;
+use std::collections::HashMap;
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -13,10 +14,10 @@ pub struct Config {
     pub general: GeneralConfig,
 
     #[serde(default)]
-    pub prompt: PromptConfig,
+    pub display: DisplayConfig,
 
     #[serde(default)]
-    pub ui: UiConfig,
+    pub styles: HashMap<String, String>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -25,26 +26,17 @@ pub struct GeneralConfig {
 }
 
 #[derive(Debug, Deserialize)]
-pub struct PromptConfig {
+pub struct DisplayConfig {
+    pub enabled: bool,
     pub template: String,
 }
 
-impl Default for PromptConfig {
+impl Default for DisplayConfig {
     fn default() -> Self {
         Self {
-            template: "Password: ".to_string(),
+            enabled: false,
+            template: String::new(),
         }
-    }
-}
-
-#[derive(Debug, Deserialize)]
-pub struct UiConfig {
-    pub enabled: bool,
-}
-
-impl Default for UiConfig {
-    fn default() -> Self {
-        Self { enabled: true }
     }
 }
 

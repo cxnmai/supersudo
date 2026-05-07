@@ -1,4 +1,5 @@
 mod config;
+mod render;
 
 use std::env;
 use std::os::unix::process::CommandExt;
@@ -32,9 +33,13 @@ fn main() {
         }
     };
 
-    // Later, this empty prompt will be replaced with the rendered supersudo prompt.
-    // For now, we suppress sudo's default `[sudo] password for user:` prompt unless
-    // the user explicitly provided their own sudo prompt via `-p` / `--prompt`.
+    if let Err(err) = render::render_pre_prompt(&loaded_config.config, &invocation.sudo_args) {
+        eprintln!("supersudo: {err}");
+        std::process::exit(2);
+    }
+
+    // Suppress sudo's default `[sudo] password for user:` prompt unless the user
+    // explicitly provided their own sudo prompt via `-p` / `--prompt`.
     let sudo_args = with_default_empty_prompt(invocation.sudo_args);
 
     let err = Command::new(&real_sudo).args(sudo_args).exec();

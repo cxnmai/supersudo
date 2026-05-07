@@ -4,3 +4,23 @@
 # Path to the real system sudo binary. Keep this absolute to avoid recursion
 # if `sudo` is aliased or shimmed to `supersudo`.
 real_sudo = "/usr/bin/sudo"
+
+[display]
+enabled = true
+template = """
+{style:corner}╭{style:line}────────────────────────────────────────{style:corner}╮{reset}
+{style:side}│{reset} {style:title}{lit:[sudo] Authentication required:pad=39}{reset}{style:side}│{reset}
+{style:side}│{reset} {style:label}user:{reset}    {style:value}{user:pad=29}{reset} {style:side}│{reset}
+{style:side}│{reset} {style:label}host:{reset}    {style:value}{host:pad=29}{reset} {style:side}│{reset}
+{style:side}│{reset} {style:label}cwd:{reset}     {style:value}{cwd:pad=29}{reset} {style:side}│{reset}
+{style:side}│{reset} {style:label}command:{reset} {style:value}{command:pad=29}{reset} {style:side}│{reset}
+{style:corner}╰{style:line}────────────────────────────────────────{style:corner}╯{reset}
+"""
+
+[styles]
+corner = "bold bright_magenta"
+line = "bright_blue"
+side = "bright_magenta"
+title = "bold yellow"
+label = "dim white"
+value = "bright_white"
