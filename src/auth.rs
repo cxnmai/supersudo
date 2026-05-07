@@ -1,4 +1,4 @@
-use crossterm::cursor::{position, Hide, MoveTo, Show};
+use crossterm::cursor::{position, Hide, MoveTo, MoveToColumn, MoveUp, Show};
 use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 use crossterm::execute;
 use crossterm::terminal::{disable_raw_mode, enable_raw_mode, Clear, ClearType};
@@ -28,43 +28,27 @@ pub fn authenticate_custom<F>(
     attempts: u8,
 ) -> Result<(), String>
 where
-    F: FnMut(&str) -> Result<String, String>,
+    F: FnMut(&str, &str) -> Result<String, String>,
 {
     let attempts = attempts.max(1);
+    let mut error_message = String::new();
+    let mut attempt = 1;
 
-    for attempt in 1..=attempts {
-        let mut password = read_password_with_feedback(&mut render_ui, feedback_char)?;
-        let ok = validate_password(real_sudo, &password);
-        password.zeroize();
-
-        match ok? {
-            true => return Ok(()),
-            false if attempt < attempts => eprintln!("\nsupersudo: authentication failed, try again"),
-            false => return Err("authentication failed".to_string()),
-        }
-    }
-
-    Err("authentication failed".to_string())
-}
-
-fn read_password_with_feedback<F>(render_ui: &mut F, feedback_char: char) -> Result<Vec<u8>, String>
-where
-    F: FnMut(&str) -> Result<String, String>,
-{
     let _tty = OpenOptions::new()
         .read(true)
         .write(true)
         .open("/dev/tty")
         .map_err(|err| format!("failed to open /dev/tty for password input: {err}"))?;
 
-    let start = position().map_err(|err| format!("failed to get cursor position: {err}"))?;
+    let mut password = Vec::new();
+    let mut feedback = String::new();
+    let start = reserve_redraw_region(&mut render_ui, &feedback, &error_message)?;
+
     let mut stdout = io::stdout();
     execute!(stdout, Hide).map_err(|err| format!("failed to hide cursor: {err}"))?;
 
     let _guard = TerminalModeGuard::new()?;
-    let mut password = Vec::new();
-    let mut feedback = String::new();
-    redraw_ui(render_ui, &feedback, start)?;
+    redraw_ui(&mut render_ui, &feedback, &error_message, start)?;
 
     loop {
         let event = event::read().map_err(|err| format!("failed to read password input: {err}"))?;
@@ -81,19 +65,19 @@ where
                 }
                 KeyCode::Char('z') => {
                     suspend_self()?;
-                    redraw_ui(render_ui, &feedback, start)?;
+                    redraw_ui(&mut render_ui, &feedback, &error_message, start)?;
                     continue;
                 }
                 KeyCode::Char('u') => {
                     password.zeroize();
                     password.clear();
                     feedback.clear();
-                    redraw_ui(render_ui, &feedback, start)?;
+                    redraw_ui(&mut render_ui, &feedback, &error_message, start)?;
                     continue;
                 }
                 KeyCode::Char('w') => {
                     pop_last_word(&mut password, &mut feedback);
-                    redraw_ui(render_ui, &feedback, start)?;
+                    redraw_ui(&mut render_ui, &feedback, &error_message, start)?;
                     continue;
                 }
                 _ => continue,
@@ -102,12 +86,25 @@ where
 
         match key.code {
             KeyCode::Enter => {
-                redraw_ui(render_ui, &feedback, start)?;
-                print!("\r\n");
-                io::stdout()
-                    .flush()
-                    .map_err(|err| format!("failed to flush password newline: {err}"))?;
-                break;
+                let ok = validate_password(real_sudo, &password);
+                password.zeroize();
+                password.clear();
+                feedback.clear();
+
+                if ok? {
+                    redraw_ui(&mut render_ui, &feedback, &error_message, start)?;
+                    return Ok(());
+                }
+
+                if attempt >= attempts {
+                    error_message = "Authentication failed".to_string();
+                    redraw_ui(&mut render_ui, &feedback, &error_message, start)?;
+                    return Err("authentication failed".to_string());
+                }
+
+                attempt += 1;
+                error_message = "Authentication failed, try again".to_string();
+                redraw_ui(&mut render_ui, &feedback, &error_message, start)?;
             }
             KeyCode::Char(ch) => {
                 if ch.is_control() {
@@ -116,13 +113,13 @@ where
                 let mut buf = [0; 4];
                 password.extend_from_slice(ch.encode_utf8(&mut buf).as_bytes());
                 feedback.push(feedback_char);
-                redraw_ui(render_ui, &feedback, start)?;
+                redraw_ui(&mut render_ui, &feedback, &error_message, start)?;
             }
             KeyCode::Backspace => {
                 if !password.is_empty() {
                     pop_last_utf8_char(&mut password);
                     feedback.pop();
-                    redraw_ui(render_ui, &feedback, start)?;
+                    redraw_ui(&mut render_ui, &feedback, &error_message, start)?;
                 }
             }
             KeyCode::Esc => {
@@ -132,15 +129,45 @@ where
             _ => {}
         }
     }
-
-    Ok(password)
 }
 
-fn redraw_ui<F>(render_ui: &mut F, feedback: &str, start: (u16, u16)) -> Result<(), String>
+fn reserve_redraw_region<F>(
+    render_ui: &mut F,
+    feedback: &str,
+    error_message: &str,
+) -> Result<(u16, u16), String>
 where
-    F: FnMut(&str) -> Result<String, String>,
+    F: FnMut(&str, &str) -> Result<String, String>,
 {
-    let rendered = render_ui(feedback)?;
+    let rendered = render_ui(feedback, error_message)?;
+    let lines = rendered_line_count(&rendered).max(1);
+    let mut stdout = io::stdout();
+
+    for _ in 0..lines {
+        stdout
+            .write_all(b"\n")
+            .map_err(|err| format!("failed to reserve password UI space: {err}"))?;
+    }
+    stdout
+        .flush()
+        .map_err(|err| format!("failed to flush password UI reservation: {err}"))?;
+
+    execute!(stdout, MoveUp(lines as u16), MoveToColumn(0))
+        .map_err(|err| format!("failed to move to password UI start: {err}"))?;
+
+    position().map_err(|err| format!("failed to get password UI start position: {err}"))
+}
+
+fn redraw_ui<F>(
+    render_ui: &mut F,
+    feedback: &str,
+    error_message: &str,
+    start: (u16, u16),
+) -> Result<(), String>
+where
+    F: FnMut(&str, &str) -> Result<String, String>,
+{
+    let rendered = render_ui(feedback, error_message)?;
     let mut stdout = io::stdout();
 
     execute!(stdout, MoveTo(start.0, start.1), Clear(ClearType::FromCursorDown))
@@ -167,6 +194,15 @@ fn suspend_self() -> Result<(), String> {
     enable_raw_mode().map_err(|err| format!("failed to re-enable raw mode after resume: {err}"))?;
     execute!(io::stdout(), Hide).map_err(|err| format!("failed to hide cursor after resume: {err}"))?;
     Ok(())
+}
+
+fn rendered_line_count(rendered: &str) -> usize {
+    let newline_count = rendered.matches('\n').count();
+    if rendered.ends_with('\n') {
+        newline_count
+    } else {
+        newline_count + 1
+    }
 }
 
 fn validate_password(real_sudo: &Path, password: &[u8]) -> Result<bool, String> {

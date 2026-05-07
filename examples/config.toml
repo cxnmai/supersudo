@@ -17,10 +17,9 @@ enabled = true
 # Template files use the same format as inline templates. Relative paths are
 # resolved relative to this config file.
 template_file = "templates/password.txt"
+error_template_file = "templates/error.txt"
 
-authenticated_template = """
-{style:ok}Authenticated!{reset} {style:label}using cached sudo credentials for{reset} {style:value}{command}{reset}
-"""
+authenticated_template = "{style:ok}Authenticated!{reset} {style:label}using cached sudo credentials for{reset} {style:value}{command}{reset}"
 
 [styles]
 corner = "bold bright_magenta"
@@ -30,3 +29,8 @@ title = "bold yellow"
 label = "dim white"
 value = "bright_white"
 ok = "bold bright_green"
+error = "bold bright_red"
+error_box = "bold bright_red"
+error_title = "bold bright_yellow"
+error_label = "bold red"
+error_value = "bright_white"

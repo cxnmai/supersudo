@@ -64,6 +64,8 @@ pub struct DisplayConfig {
     #[serde(default)]
     pub template: String,
     pub template_file: Option<PathBuf>,
+    pub error_template: Option<String>,
+    pub error_template_file: Option<PathBuf>,
     pub authenticated_template: Option<String>,
     pub authenticated_template_file: Option<PathBuf>,
 }
@@ -74,6 +76,8 @@ impl Default for DisplayConfig {
             enabled: false,
             template: String::new(),
             template_file: None,
+            error_template: None,
+            error_template_file: None,
             authenticated_template: None,
             authenticated_template_file: None,
         }
@@ -125,6 +129,14 @@ fn load_required(path: PathBuf) -> Result<LoadedConfig, String> {
 fn load_external_templates(config: &mut Config, config_path: &Path) -> Result<(), String> {
     if let Some(path) = &config.display.template_file {
         config.display.template = read_template_file(config_path, path, "display.template_file")?;
+    }
+
+    if let Some(path) = &config.display.error_template_file {
+        config.display.error_template = Some(read_template_file(
+            config_path,
+            path,
+            "display.error_template_file",
+        )?);
     }
 
     if let Some(path) = &config.display.authenticated_template_file {

@@ -53,10 +53,15 @@ fn main() {
                 }
             }
             Ok(false) => {
-                let render_password_ui = |password_feedback: &str| {
+                let render_password_ui = |password_feedback: &str, error_message: &str| {
                     let mut extra = std::collections::HashMap::new();
                     extra.insert("password".to_string(), password_feedback.to_string());
-                    render::render_display(&loaded_config.config, &display_args, &extra)
+                    extra.insert("error".to_string(), error_message.to_string());
+                    if error_message.is_empty() {
+                        render::render_display(&loaded_config.config, &display_args, &extra)
+                    } else {
+                        render::render_error_display(&loaded_config.config, &display_args, &extra)
+                    }
                 };
 
                 if let Err(err) = auth::authenticate_custom(

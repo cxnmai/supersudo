@@ -12,6 +12,19 @@ pub fn render_display(
     render_named_template(&config.display.template, config, sudo_args, extra_vars)
 }
 
+pub fn render_error_display(
+    config: &Config,
+    sudo_args: &[String],
+    extra_vars: &HashMap<String, String>,
+) -> Result<String, String> {
+    let template = config
+        .display
+        .error_template
+        .as_deref()
+        .unwrap_or(&config.display.template);
+    render_named_template(template, config, sudo_args, extra_vars)
+}
+
 pub fn render_authenticated_display(config: &Config, sudo_args: &[String]) -> Result<(), String> {
     if !config.display.enabled || !io::stdout().is_terminal() {
         return Ok(());

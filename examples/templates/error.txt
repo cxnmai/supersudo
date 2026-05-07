@@ -1,0 +1,9 @@
+{style:error_box}╭────────────────────────────────────────╮{reset}
+{style:error_box}│{reset} {style:error_title}{lit:[sudo] Authentication failed:pad=39}{reset}{style:error_box}│{reset}
+{style:error_box}│{reset} {style:error_label}user:{reset}     {style:error_value}{user:pad=28}{reset} {style:error_box}│{reset}
+{style:error_box}│{reset} {style:error_label}host:{reset}     {style:error_value}{host:pad=28}{reset} {style:error_box}│{reset}
+{style:error_box}│{reset} {style:error_label}cwd:{reset}      {style:error_value}{cwd:pad=28}{reset} {style:error_box}│{reset}
+{style:error_box}│{reset} {style:error_label}command:{reset}  {style:error_value}{command:pad=28}{reset} {style:error_box}│{reset}
+{style:error_box}│{reset} {style:error_label}password:{reset} {style:error_value}{password:pad=28}{reset} {style:error_box}│{reset}
+{style:error_box}│{reset} {style:error}{error:pad=39}{reset}{style:error_box}│{reset}
+{style:error_box}╰────────────────────────────────────────╯{reset}
