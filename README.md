@@ -8,41 +8,23 @@
 <img width="1076" height="900" alt="githubgif2" src="https://github.com/user-attachments/assets/1ff6bb13-bf9d-400b-ac40-672af860287b" />
 
 
-## Security model
+## Security Notice
 
-`supersudo` does **not** bundle or replace sudo.
+`supersudo` does **not** replace sudo. It delegates authentication, sudoers policy, credential caching, and command execution to the real system `sudo`.
 
-There are two input modes:
+Risk summary:
 
-```toml
-[input]
-mode = "sudo"
-```
+- `mode = "sudo"` is safest because `supersudo` never sees your password.
+- `mode = "custom"` enables live password UI, but `supersudo` must read your password.
+- Custom mode uses protected memory, avoids growable heap password buffers, zeroes password bytes after use, and marks the process non-dumpable on Linux while reading the password.
+- These protections are best-effort. They do not protect against a compromised process, root/debugger access, malicious terminal behavior, kernel/terminal buffers, sudo internals, or abnormal termination such as `SIGKILL`.
+- Do not use untrusted configs or templates; they can display arbitrary terminal text.
 
-Real sudo reads the password. This is the safest mode, but live password feedback/animations during typing are not available.
+Security flow:
 
-```toml
-[input]
-mode = "custom"
-```
-
-`supersudo` reads the password to render live feedback and animated UI, then validates it with:
-
-```bash
-/usr/bin/sudo -S -p "" -v
-```
-
-If validation succeeds, it runs the requested command with:
-
-```bash
-/usr/bin/sudo -n ...
-```
-
-In custom mode, the password is never passed through args, env vars, config files, temp files, or shell commands. It is sent only through sudo stdin and zeroized after validation/cancellation.
-
-During custom password entry, `supersudo` stores the password in a fixed-size protected memory allocation using the Rust `secrets` crate rather than a growable heap buffer. This avoids heap reallocations that could leave stale password prefixes behind. The protected allocation is locked with `mlock(2)`, guarded, inaccessible outside explicit borrow scopes with `mprotect(2)`, and zeroed when released on supported Unix targets. On Linux, `supersudo` also marks the process non-dumpable while reading the password.
-
-This is still best-effort userspace protection. Custom mode necessarily exposes the password to the `supersudo` process while typing and validating it, and cannot eliminate exposure through terminal/kernel buffers, sudo stdin, root/debugger access, process compromise, or abnormal termination such as `SIGKILL`.
+- In sudo mode, `supersudo` renders optional UI, then execs real `sudo`.
+- In custom mode, `supersudo` reads the password into protected memory, validates it with `sudo -S -p "" -v`, clears it, then runs the requested command with `sudo -n`.
+- The password is never passed through args, env vars, config files, temp files, or shell commands.
 
 ## Usage
 
