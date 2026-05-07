@@ -203,9 +203,3 @@ cargo check
 cargo clippy -- -D warnings
 cargo test
 ```
-
-## Caveats
-
-- `mode = "custom"` is security-sensitive because `supersudo` sees the password.
-- Terminal state is restored on normal exits, but no program can recover from `SIGKILL`.
-- Do not use untrusted configs/templates; they can display arbitrary terminal text.
