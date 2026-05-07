@@ -152,7 +152,9 @@ real_sudo = "/usr/bin/sudo"
 
 [input]
 # "sudo" lets real sudo read the password.
-# "custom" lets supersudo read the password for live feedback/animations.
+# "custom" lets supersudo read the password for live feedback/animations. It
+# uses protected memory, but "sudo" mode is safer because supersudo never sees
+# the password.
 mode = "sudo"
 feedback_char = "*"
 attempts = 3

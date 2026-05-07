@@ -11,6 +11,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 const MAX_PASSWORD_BYTES: usize = 1024;
+const SUDO_VALIDATION_ARGS: [&str; 4] = ["-S", "-p", "", "-v"];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PromptState {
@@ -43,6 +44,7 @@ pub fn authenticate_custom<F>(
 where
     F: FnMut(&str, PromptState, &str, u128) -> Result<String, String>,
 {
+    let _dumpable_guard = DumpableGuard::new()?;
     let animation_start = Instant::now();
     let attempts = attempts.max(1);
     let mut message = String::new();
@@ -122,16 +124,8 @@ where
                     return Err("password input cancelled".to_string());
                 }
                 KeyCode::Char('z') => {
-                    suspend_self()?;
-                    redraw_ui(
-                        &mut render_ui,
-                        &feedback,
-                        prompt_state(error_until),
-                        &message,
-                        start,
-                        animation_start,
-                    )?;
-                    continue;
+                    password.clear();
+                    return Err("password input cancelled".to_string());
                 }
                 KeyCode::Char('u') => {
                     password.clear();
@@ -167,7 +161,7 @@ where
 
         match key.code {
             KeyCode::Enter => {
-                let ok = password.with_bytes(|bytes| validate_password(real_sudo, bytes));
+                let ok = validate_password(real_sudo, &password);
                 password.clear();
                 feedback.clear();
 
@@ -324,23 +318,6 @@ where
     Ok(())
 }
 
-fn suspend_self() -> Result<(), String> {
-    disable_raw_mode()
-        .map_err(|err| format!("failed to disable raw mode before suspend: {err}"))?;
-    execute!(io::stdout(), Show)
-        .map_err(|err| format!("failed to show cursor before suspend: {err}"))?;
-
-    let rc = unsafe { libc::raise(libc::SIGTSTP) };
-    if rc != 0 {
-        return Err("failed to suspend process".to_string());
-    }
-
-    enable_raw_mode().map_err(|err| format!("failed to re-enable raw mode after resume: {err}"))?;
-    execute!(io::stdout(), Hide)
-        .map_err(|err| format!("failed to hide cursor after resume: {err}"))?;
-    Ok(())
-}
-
 fn rendered_line_count(rendered: &str) -> usize {
     let newline_count = rendered.matches('\n').count();
     if rendered.ends_with('\n') {
@@ -350,12 +327,9 @@ fn rendered_line_count(rendered: &str) -> usize {
     }
 }
 
-fn validate_password(real_sudo: &Path, password: &[u8]) -> Result<bool, String> {
+fn validate_password(real_sudo: &Path, password: &PasswordBuffer) -> Result<bool, String> {
     let mut child = Command::new(real_sudo)
-        .arg("-S")
-        .arg("-p")
-        .arg("")
-        .arg("-v")
+        .args(SUDO_VALIDATION_ARGS)
         .stdin(Stdio::piped())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
@@ -367,8 +341,8 @@ fn validate_password(real_sudo: &Path, password: &[u8]) -> Result<bool, String> 
             .stdin
             .as_mut()
             .ok_or_else(|| "failed to open sudo validation stdin".to_string())?;
-        stdin
-            .write_all(password)
+        password
+            .write_to(&mut *stdin)
             .and_then(|_| stdin.write_all(b"\n"))
             .and_then(|_| stdin.flush())
             .map_err(|err| format!("failed to write password to sudo: {err}"))?;
@@ -379,6 +353,51 @@ fn validate_password(real_sudo: &Path, password: &[u8]) -> Result<bool, String> 
         .map_err(|err| format!("failed waiting for sudo validation: {err}"))?;
 
     Ok(status.success())
+}
+
+#[cfg(target_os = "linux")]
+struct DumpableGuard {
+    previous: libc::c_int,
+}
+
+#[cfg(target_os = "linux")]
+impl DumpableGuard {
+    fn new() -> Result<Self, String> {
+        let previous = unsafe { libc::prctl(libc::PR_GET_DUMPABLE) };
+        if previous < 0 {
+            return Err(format!(
+                "failed to read process dumpability: {}",
+                io::Error::last_os_error()
+            ));
+        }
+
+        let rc = unsafe { libc::prctl(libc::PR_SET_DUMPABLE, 0) };
+        if rc != 0 {
+            return Err(format!(
+                "failed to disable process dumpability: {}",
+                io::Error::last_os_error()
+            ));
+        }
+
+        Ok(Self { previous })
+    }
+}
+
+#[cfg(target_os = "linux")]
+impl Drop for DumpableGuard {
+    fn drop(&mut self) {
+        let _ = unsafe { libc::prctl(libc::PR_SET_DUMPABLE, self.previous) };
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+struct DumpableGuard;
+
+#[cfg(not(target_os = "linux"))]
+impl DumpableGuard {
+    fn new() -> Result<Self, String> {
+        Ok(Self)
+    }
 }
 
 struct TerminalModeGuard;
@@ -474,9 +493,15 @@ impl PasswordBuffer {
         self.len = 0;
     }
 
+    #[cfg(test)]
     fn with_bytes<T>(&self, f: impl FnOnce(&[u8]) -> T) -> T {
         let secret = self.secret.borrow();
         f(&secret[..self.len])
+    }
+
+    fn write_to(&self, mut writer: impl Write) -> io::Result<()> {
+        let secret = self.secret.borrow();
+        writer.write_all(&secret[..self.len])
     }
 
     fn last_byte(&self) -> Option<u8> {
@@ -484,7 +509,8 @@ impl PasswordBuffer {
             return None;
         }
 
-        self.with_bytes(|bytes| bytes.last().copied())
+        let secret = self.secret.borrow();
+        secret[..self.len].last().copied()
     }
 
     fn last_char_start(&self) -> Option<usize> {
@@ -492,13 +518,13 @@ impl PasswordBuffer {
             return None;
         }
 
-        self.with_bytes(|bytes| {
-            let mut start = bytes.len() - 1;
-            while start > 0 && bytes[start] & 0b1100_0000 == 0b1000_0000 {
-                start -= 1;
-            }
-            Some(start)
-        })
+        let secret = self.secret.borrow();
+        let bytes = &secret[..self.len];
+        let mut start = bytes.len() - 1;
+        while start > 0 && bytes[start] & 0b1100_0000 == 0b1000_0000 {
+            start -= 1;
+        }
+        Some(start)
     }
 
     fn zero_range(&mut self, start: usize, end: usize) {
@@ -567,6 +593,20 @@ mod tests {
 
         assert!(password.is_empty());
         password.with_bytes(|bytes| assert!(bytes.is_empty()));
+    }
+
+    #[test]
+    fn password_buffer_write_to_writes_only_visible_contents() {
+        let mut password = PasswordBuffer::new();
+        let mut out = Vec::new();
+
+        password.push_char('x').unwrap();
+        password.push_char('y').unwrap();
+        password.pop_char();
+
+        password.write_to(&mut out).unwrap();
+
+        assert_eq!(out, b"x");
     }
 
     #[test]

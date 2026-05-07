@@ -8,6 +8,8 @@ real_sudo = "/usr/bin/sudo"
 [input]
 # "sudo" lets real sudo read the password. "custom" lets supersudo read it,
 # show live feedback, validate with `sudo -S -p "" -v`, then run with `sudo -n`.
+# Custom mode uses protected memory, but sudo mode is safer because supersudo
+# never handles the password.
 mode = "custom"
 feedback_char = "*"
 attempts = 3

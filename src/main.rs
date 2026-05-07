@@ -117,6 +117,7 @@ fn main() {
                      message: &str,
                      elapsed_ms: u128| {
                         let mut extra = std::collections::HashMap::new();
+                        // The template variable is historical; this is only mask characters.
                         extra.insert("password".to_string(), password_feedback.to_string());
                         extra.insert("error".to_string(), message.to_string());
                         extra.insert("success".to_string(), message.to_string());
@@ -161,8 +162,7 @@ fn main() {
             }
         }
 
-        // After custom validation, do not allow sudo to prompt again.
-        sudo_args.insert(0, "-n".to_string());
+        sudo_args = final_args_after_custom_auth(sudo_args);
     }
 
     let err = Command::new(&real_sudo).args(sudo_args).exec();
@@ -190,6 +190,12 @@ fn with_default_empty_prompt(args: Vec<String>) -> Vec<String> {
     prompted_args.push(String::new());
     prompted_args.extend(args);
     prompted_args
+}
+
+fn final_args_after_custom_auth(mut args: Vec<String>) -> Vec<String> {
+    // After custom validation, do not allow sudo to prompt again.
+    args.insert(0, "-n".to_string());
+    args
 }
 
 fn has_sudo_prompt_arg(args: &[String]) -> bool {
@@ -282,4 +288,42 @@ fn reject_self_reference(path: &Path, source: &str) -> Result<(), String> {
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{final_args_after_custom_auth, has_sudo_prompt_arg, with_default_empty_prompt};
+
+    #[test]
+    fn default_empty_prompt_is_added_when_missing() {
+        let args = with_default_empty_prompt(vec!["whoami".to_string()]);
+
+        assert_eq!(args, vec!["-p", "", "whoami"]);
+    }
+
+    #[test]
+    fn default_empty_prompt_preserves_user_prompt() {
+        let args =
+            with_default_empty_prompt(vec!["--prompt=Password:".to_string(), "whoami".to_string()]);
+
+        assert_eq!(args, vec!["--prompt=Password:", "whoami"]);
+    }
+
+    #[test]
+    fn sudo_prompt_detection_stops_after_double_dash() {
+        let args = vec!["--".to_string(), "-pnot-sudo-option".to_string()];
+
+        assert!(!has_sudo_prompt_arg(&args));
+    }
+
+    #[test]
+    fn custom_auth_final_args_prevent_sudo_reprompt() {
+        let args = final_args_after_custom_auth(vec![
+            "-p".to_string(),
+            String::new(),
+            "whoami".to_string(),
+        ]);
+
+        assert_eq!(args, vec!["-n", "-p", "", "whoami"]);
+    }
 }
