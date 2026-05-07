@@ -34,28 +34,29 @@ fn main() {
         }
     };
 
-    if let Err(err) = render::render_pre_prompt(&loaded_config.config, &invocation.sudo_args) {
-        eprintln!("supersudo: {err}");
-        std::process::exit(2);
+    if loaded_config.config.input.mode != config::InputMode::Custom {
+        if let Err(err) = render::render_pre_prompt(&loaded_config.config, &invocation.sudo_args) {
+            eprintln!("supersudo: {err}");
+            std::process::exit(2);
+        }
     }
 
+    let display_args = invocation.sudo_args.clone();
     let mut sudo_args = with_default_empty_prompt(invocation.sudo_args);
 
     if loaded_config.config.input.mode == config::InputMode::Custom {
         match auth::credentials_are_cached(&real_sudo) {
             Ok(true) => {}
             Ok(false) => {
-                let input_prompt = match render::render_input_prompt(&loaded_config.config, &sudo_args) {
-                    Ok(prompt) => prompt,
-                    Err(err) => {
-                        eprintln!("supersudo: {err}");
-                        std::process::exit(2);
-                    }
+                let render_password_ui = |password_feedback: &str| {
+                    let mut extra = std::collections::HashMap::new();
+                    extra.insert("password".to_string(), password_feedback.to_string());
+                    render::render_display(&loaded_config.config, &display_args, &extra)
                 };
 
                 if let Err(err) = auth::authenticate_custom(
                     &real_sudo,
-                    &input_prompt,
+                    render_password_ui,
                     loaded_config.config.input.feedback_char,
                     loaded_config.config.input.attempts,
                 ) {

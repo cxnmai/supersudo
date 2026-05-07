@@ -31,7 +31,6 @@ pub struct GeneralConfig {
 #[derive(Debug, Deserialize)]
 pub struct InputConfig {
     pub mode: InputMode,
-    pub prompt: String,
     pub feedback_char: char,
     pub attempts: u8,
 }
@@ -40,7 +39,6 @@ impl Default for InputConfig {
     fn default() -> Self {
         Self {
             mode: InputMode::Sudo,
-            prompt: "Password: ".to_string(),
             feedback_char: '*',
             attempts: 3,
         }

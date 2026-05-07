@@ -1,5 +1,7 @@
+use crossterm::cursor::{Hide, RestorePosition, SavePosition, Show};
 use crossterm::event::{self, Event, KeyCode, KeyEventKind};
-use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
+use crossterm::execute;
+use crossterm::terminal::{disable_raw_mode, enable_raw_mode, Clear, ClearType};
 use std::fs::OpenOptions;
 use std::io::{self, Write};
 use std::path::Path;
@@ -19,16 +21,19 @@ pub fn credentials_are_cached(real_sudo: &Path) -> Result<bool, String> {
     Ok(status.success())
 }
 
-pub fn authenticate_custom(
+pub fn authenticate_custom<F>(
     real_sudo: &Path,
-    prompt: &str,
+    mut render_ui: F,
     feedback_char: char,
     attempts: u8,
-) -> Result<(), String> {
+) -> Result<(), String>
+where
+    F: FnMut(&str) -> Result<String, String>,
+{
     let attempts = attempts.max(1);
 
     for attempt in 1..=attempts {
-        let mut password = read_password_with_feedback(prompt, feedback_char)?;
+        let mut password = read_password_with_feedback(&mut render_ui, feedback_char)?;
         let ok = validate_password(real_sudo, &password);
         password.zeroize();
 
@@ -42,23 +47,26 @@ pub fn authenticate_custom(
     Err("authentication failed".to_string())
 }
 
-fn read_password_with_feedback(prompt: &str, feedback_char: char) -> Result<Vec<u8>, String> {
+fn read_password_with_feedback<F>(render_ui: &mut F, feedback_char: char) -> Result<Vec<u8>, String>
+where
+    F: FnMut(&str) -> Result<String, String>,
+{
     let _tty = OpenOptions::new()
         .read(true)
         .write(true)
         .open("/dev/tty")
         .map_err(|err| format!("failed to open /dev/tty for password input: {err}"))?;
 
-    print!("{prompt}");
-    io::stdout()
-        .flush()
-        .map_err(|err| format!("failed to flush password prompt: {err}"))?;
+    let mut stdout = io::stdout();
+    execute!(stdout, SavePosition, Hide)
+        .map_err(|err| format!("failed to save cursor position: {err}"))?;
 
-    let _guard = RawModeGuard::new()?;
+    let _guard = TerminalModeGuard::new()?;
     let mut password = Vec::new();
-    let mut feedback_width = 0usize;
+    let mut feedback = String::new();
 
     loop {
+        redraw_ui(render_ui, &feedback)?;
         let event = event::read().map_err(|err| format!("failed to read password input: {err}"))?;
         let Event::Key(key) = event else { continue };
         if key.kind != KeyEventKind::Press {
@@ -67,28 +75,22 @@ fn read_password_with_feedback(prompt: &str, feedback_char: char) -> Result<Vec<
 
         match key.code {
             KeyCode::Enter => {
-                println!();
+                redraw_ui(render_ui, &feedback)?;
+                print!("\r\n");
+                io::stdout()
+                    .flush()
+                    .map_err(|err| format!("failed to flush password newline: {err}"))?;
                 break;
             }
             KeyCode::Char(ch) => {
                 let mut buf = [0; 4];
                 password.extend_from_slice(ch.encode_utf8(&mut buf).as_bytes());
-                print!("{feedback_char}");
-                feedback_width += 1;
-                io::stdout()
-                    .flush()
-                    .map_err(|err| format!("failed to flush password feedback: {err}"))?;
+                feedback.push(feedback_char);
             }
             KeyCode::Backspace => {
                 if !password.is_empty() {
                     pop_last_utf8_char(&mut password);
-                    if feedback_width > 0 {
-                        feedback_width -= 1;
-                        print!("\x08 \x08");
-                        io::stdout()
-                            .flush()
-                            .map_err(|err| format!("failed to flush password feedback: {err}"))?;
-                    }
+                    feedback.pop();
                 }
             }
             KeyCode::Esc => {
@@ -100,6 +102,22 @@ fn read_password_with_feedback(prompt: &str, feedback_char: char) -> Result<Vec<
     }
 
     Ok(password)
+}
+
+fn redraw_ui<F>(render_ui: &mut F, feedback: &str) -> Result<(), String>
+where
+    F: FnMut(&str) -> Result<String, String>,
+{
+    let rendered = render_ui(feedback)?;
+    let mut stdout = io::stdout();
+    execute!(stdout, RestorePosition, Clear(ClearType::FromCursorDown))
+        .map_err(|err| format!("failed to redraw password UI: {err}"))?;
+    let rendered = rendered.replace('\n', "\r\n");
+    stdout
+        .write_all(rendered.as_bytes())
+        .and_then(|_| stdout.flush())
+        .map_err(|err| format!("failed to write password UI: {err}"))?;
+    Ok(())
 }
 
 fn validate_password(real_sudo: &Path, password: &[u8]) -> Result<bool, String> {
@@ -141,17 +159,18 @@ fn pop_last_utf8_char(bytes: &mut Vec<u8>) {
     }
 }
 
-struct RawModeGuard;
+struct TerminalModeGuard;
 
-impl RawModeGuard {
+impl TerminalModeGuard {
     fn new() -> Result<Self, String> {
         enable_raw_mode().map_err(|err| format!("failed to enable raw terminal mode: {err}"))?;
         Ok(Self)
     }
 }
 
-impl Drop for RawModeGuard {
+impl Drop for TerminalModeGuard {
     fn drop(&mut self) {
         let _ = disable_raw_mode();
+        let _ = execute!(io::stdout(), Show);
     }
 }

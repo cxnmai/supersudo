@@ -4,9 +4,14 @@ use std::env;
 use std::io::{self, IsTerminal, Write};
 use unicode_width::UnicodeWidthStr;
 
-pub fn render_input_prompt(config: &Config, sudo_args: &[String]) -> Result<String, String> {
-    let vars = template_vars(sudo_args);
-    render_template(&config.input.prompt, &config.styles, &vars)
+pub fn render_display(
+    config: &Config,
+    sudo_args: &[String],
+    extra_vars: &HashMap<String, String>,
+) -> Result<String, String> {
+    let mut vars = template_vars(sudo_args);
+    vars.extend(extra_vars.clone());
+    render_template(&config.display.template, &config.styles, &vars)
 }
 
 pub fn render_pre_prompt(config: &Config, sudo_args: &[String]) -> Result<(), String> {
@@ -14,8 +19,7 @@ pub fn render_pre_prompt(config: &Config, sudo_args: &[String]) -> Result<(), St
         return Ok(());
     }
 
-    let vars = template_vars(sudo_args);
-    let rendered = render_template(&config.display.template, &config.styles, &vars)?;
+    let rendered = render_display(config, sudo_args, &HashMap::new())?;
 
     let mut stdout = io::stdout();
     stdout
