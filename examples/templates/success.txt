@@ -1,0 +1,5 @@
+{style:success_box}╭────────────────────────────────────────╮{reset}
+{style:success_box}│{reset} {style:success_title}{lit:Authentication successful:pad=39}{reset}{style:success_box}│{reset}
+{style:success_box}│{reset} {style:success_label}user:{reset}    {style:success_value}{user:pad=29}{reset} {style:success_box}│{reset}
+{style:success_box}│{reset} {style:success_label}command:{reset} {style:success_value}{command:pad=29}{reset} {style:success_box}│{reset}
+{style:success_box}╰────────────────────────────────────────╯{reset}

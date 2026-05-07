@@ -7,8 +7,15 @@ use std::io::{self, Write};
 use std::path::Path;
 use std::process::{Command, Stdio};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use zeroize::Zeroize;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PromptState {
+    Normal,
+    Error,
+    Success,
+}
 
 pub fn credentials_are_cached(real_sudo: &Path) -> Result<bool, String> {
     let status = Command::new(real_sudo)
@@ -29,12 +36,13 @@ pub fn authenticate_custom<F>(
     feedback_char: char,
     attempts: u8,
     error_delay_ms: u64,
+    success_delay_ms: u64,
 ) -> Result<(), String>
 where
-    F: FnMut(&str, &str) -> Result<String, String>,
+    F: FnMut(&str, PromptState, &str) -> Result<String, String>,
 {
     let attempts = attempts.max(1);
-    let mut error_message = String::new();
+    let mut message = String::new();
     let mut attempt = 1;
 
     let _tty = OpenOptions::new()
@@ -45,15 +53,31 @@ where
 
     let mut password = Vec::new();
     let mut feedback = String::new();
-    let start = reserve_redraw_region(&mut render_ui, &feedback, &error_message)?;
+    let start = reserve_redraw_region(&mut render_ui, &feedback, PromptState::Normal, &message)?;
 
     let mut stdout = io::stdout();
     execute!(stdout, Hide).map_err(|err| format!("failed to hide cursor: {err}"))?;
 
     let _guard = TerminalModeGuard::new()?;
-    redraw_ui(&mut render_ui, &feedback, &error_message, start)?;
+    let mut error_until: Option<Instant> = None;
+    redraw_ui(&mut render_ui, &feedback, prompt_state(error_until), &message, start)?;
 
     loop {
+        let state = prompt_state(error_until);
+        if state == PromptState::Normal && !message.is_empty() {
+            message.clear();
+            error_until = None;
+            redraw_ui(&mut render_ui, &feedback, prompt_state(error_until), &message, start)?;
+        }
+
+        let timeout = error_until
+            .and_then(|until| until.checked_duration_since(Instant::now()))
+            .unwrap_or_else(|| Duration::from_millis(250));
+
+        if !event::poll(timeout).map_err(|err| format!("failed to poll password input: {err}"))? {
+            continue;
+        }
+
         let event = event::read().map_err(|err| format!("failed to read password input: {err}"))?;
         let Event::Key(key) = event else { continue };
         if key.kind != KeyEventKind::Press {
@@ -68,19 +92,19 @@ where
                 }
                 KeyCode::Char('z') => {
                     suspend_self()?;
-                    redraw_ui(&mut render_ui, &feedback, &error_message, start)?;
+                    redraw_ui(&mut render_ui, &feedback, prompt_state(error_until), &message, start)?;
                     continue;
                 }
                 KeyCode::Char('u') => {
                     password.zeroize();
                     password.clear();
                     feedback.clear();
-                    redraw_ui(&mut render_ui, &feedback, &error_message, start)?;
+                    redraw_ui(&mut render_ui, &feedback, prompt_state(error_until), &message, start)?;
                     continue;
                 }
                 KeyCode::Char('w') => {
                     pop_last_word(&mut password, &mut feedback);
-                    redraw_ui(&mut render_ui, &feedback, &error_message, start)?;
+                    redraw_ui(&mut render_ui, &feedback, prompt_state(error_until), &message, start)?;
                     continue;
                 }
                 _ => continue,
@@ -95,24 +119,24 @@ where
                 feedback.clear();
 
                 if ok? {
-                    redraw_ui(&mut render_ui, &feedback, &error_message, start)?;
+                    message = "Authentication successful".to_string();
+                    redraw_ui(&mut render_ui, &feedback, PromptState::Success, &message, start)?;
+                    if success_delay_ms > 0 {
+                        thread::sleep(Duration::from_millis(success_delay_ms));
+                    }
                     return Ok(());
                 }
 
                 if attempt >= attempts {
-                    error_message = "Authentication failed".to_string();
-                    redraw_ui(&mut render_ui, &feedback, &error_message, start)?;
+                    message = "Authentication failed".to_string();
+                    redraw_ui(&mut render_ui, &feedback, PromptState::Error, &message, start)?;
                     return Err("authentication failed".to_string());
                 }
 
                 attempt += 1;
-                error_message = "Authentication failed, try again".to_string();
-                redraw_ui(&mut render_ui, &feedback, &error_message, start)?;
-                if error_delay_ms > 0 {
-                    thread::sleep(Duration::from_millis(error_delay_ms));
-                }
-                error_message.clear();
-                redraw_ui(&mut render_ui, &feedback, &error_message, start)?;
+                message = "Authentication failed, try again".to_string();
+                error_until = Some(Instant::now() + Duration::from_millis(error_delay_ms));
+                redraw_ui(&mut render_ui, &feedback, PromptState::Error, &message, start)?;
             }
             KeyCode::Char(ch) => {
                 if ch.is_control() {
@@ -121,13 +145,13 @@ where
                 let mut buf = [0; 4];
                 password.extend_from_slice(ch.encode_utf8(&mut buf).as_bytes());
                 feedback.push(feedback_char);
-                redraw_ui(&mut render_ui, &feedback, &error_message, start)?;
+                redraw_ui(&mut render_ui, &feedback, prompt_state(error_until), &message, start)?;
             }
             KeyCode::Backspace => {
                 if !password.is_empty() {
                     pop_last_utf8_char(&mut password);
                     feedback.pop();
-                    redraw_ui(&mut render_ui, &feedback, &error_message, start)?;
+                    redraw_ui(&mut render_ui, &feedback, prompt_state(error_until), &message, start)?;
                 }
             }
             KeyCode::Esc => {
@@ -139,15 +163,23 @@ where
     }
 }
 
+fn prompt_state(error_until: Option<Instant>) -> PromptState {
+    match error_until {
+        Some(until) if Instant::now() < until => PromptState::Error,
+        _ => PromptState::Normal,
+    }
+}
+
 fn reserve_redraw_region<F>(
     render_ui: &mut F,
     feedback: &str,
-    error_message: &str,
+    state: PromptState,
+    message: &str,
 ) -> Result<(u16, u16), String>
 where
-    F: FnMut(&str, &str) -> Result<String, String>,
+    F: FnMut(&str, PromptState, &str) -> Result<String, String>,
 {
-    let rendered = render_ui(feedback, error_message)?;
+    let rendered = render_ui(feedback, state, message)?;
     let lines = rendered_line_count(&rendered).max(1);
     let mut stdout = io::stdout();
 
@@ -169,13 +201,14 @@ where
 fn redraw_ui<F>(
     render_ui: &mut F,
     feedback: &str,
-    error_message: &str,
+    state: PromptState,
+    message: &str,
     start: (u16, u16),
 ) -> Result<(), String>
 where
-    F: FnMut(&str, &str) -> Result<String, String>,
+    F: FnMut(&str, PromptState, &str) -> Result<String, String>,
 {
-    let rendered = render_ui(feedback, error_message)?;
+    let rendered = render_ui(feedback, state, message)?;
     let mut stdout = io::stdout();
 
     execute!(stdout, MoveTo(start.0, start.1), Clear(ClearType::FromCursorDown))

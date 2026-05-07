@@ -13,6 +13,8 @@ feedback_char = "*"
 attempts = 3
 # How long the error template stays visible before returning to the normal prompt.
 error_delay_ms = 3000
+# How long the success template stays visible before the command runs.
+success_delay_ms = 700
 
 [display]
 enabled = true
@@ -20,6 +22,7 @@ enabled = true
 # resolved relative to this config file.
 template_file = "templates/password.txt"
 error_template_file = "templates/error.txt"
+success_template_file = "templates/success.txt"
 
 authenticated_template = "{style:ok}Authenticated!{reset} {style:label}using cached sudo credentials for{reset} {style:value}{command}{reset}"
 
@@ -36,3 +39,7 @@ error_box = "bold bright_red"
 error_title = "bold bright_yellow"
 error_label = "bold red"
 error_value = "bright_white"
+success_box = "bold bright_green"
+success_title = "bold bright_green"
+success_label = "green"
+success_value = "bright_white"

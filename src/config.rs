@@ -34,6 +34,7 @@ pub struct InputConfig {
     pub feedback_char: char,
     pub attempts: u8,
     pub error_delay_ms: u64,
+    pub success_delay_ms: u64,
 }
 
 impl Default for InputConfig {
@@ -43,6 +44,7 @@ impl Default for InputConfig {
             feedback_char: '*',
             attempts: 3,
             error_delay_ms: 900,
+            success_delay_ms: 700,
         }
     }
 }
@@ -68,6 +70,8 @@ pub struct DisplayConfig {
     pub template_file: Option<PathBuf>,
     pub error_template: Option<String>,
     pub error_template_file: Option<PathBuf>,
+    pub success_template: Option<String>,
+    pub success_template_file: Option<PathBuf>,
     pub authenticated_template: Option<String>,
     pub authenticated_template_file: Option<PathBuf>,
 }
@@ -80,6 +84,8 @@ impl Default for DisplayConfig {
             template_file: None,
             error_template: None,
             error_template_file: None,
+            success_template: None,
+            success_template_file: None,
             authenticated_template: None,
             authenticated_template_file: None,
         }
@@ -138,6 +144,14 @@ fn load_external_templates(config: &mut Config, config_path: &Path) -> Result<()
             config_path,
             path,
             "display.error_template_file",
+        )?);
+    }
+
+    if let Some(path) = &config.display.success_template_file {
+        config.display.success_template = Some(read_template_file(
+            config_path,
+            path,
+            "display.success_template_file",
         )?);
     }
 

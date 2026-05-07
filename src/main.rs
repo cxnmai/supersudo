@@ -53,14 +53,16 @@ fn main() {
                 }
             }
             Ok(false) => {
-                let render_password_ui = |password_feedback: &str, error_message: &str| {
+                let render_password_ui = |password_feedback: &str, state: auth::PromptState, message: &str| {
                     let mut extra = std::collections::HashMap::new();
                     extra.insert("password".to_string(), password_feedback.to_string());
-                    extra.insert("error".to_string(), error_message.to_string());
-                    if error_message.is_empty() {
-                        render::render_display(&loaded_config.config, &display_args, &extra)
-                    } else {
-                        render::render_error_display(&loaded_config.config, &display_args, &extra)
+                    extra.insert("error".to_string(), message.to_string());
+                    extra.insert("success".to_string(), message.to_string());
+                    match state {
+                        auth::PromptState::Normal => render::render_display(&loaded_config.config, &display_args, &extra),
+                        auth::PromptState::Error => render::render_error_display(&loaded_config.config, &display_args, &extra),
+                        auth::PromptState::Success => render::render_success_display(&loaded_config.config, &display_args, &extra)
+                            .map(|maybe| maybe.unwrap_or_default()),
                     }
                 };
 
@@ -70,6 +72,7 @@ fn main() {
                     loaded_config.config.input.feedback_char,
                     loaded_config.config.input.attempts,
                     loaded_config.config.input.error_delay_ms,
+                    loaded_config.config.input.success_delay_ms,
                 ) {
                     eprintln!("supersudo: {err}");
                     std::process::exit(1);
