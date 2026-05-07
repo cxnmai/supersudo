@@ -69,6 +69,7 @@ fn main() {
                     render_password_ui,
                     loaded_config.config.input.feedback_char,
                     loaded_config.config.input.attempts,
+                    loaded_config.config.input.error_delay_ms,
                 ) {
                     eprintln!("supersudo: {err}");
                     std::process::exit(1);

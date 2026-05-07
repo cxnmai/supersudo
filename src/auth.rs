@@ -6,6 +6,8 @@ use std::fs::OpenOptions;
 use std::io::{self, Write};
 use std::path::Path;
 use std::process::{Command, Stdio};
+use std::thread;
+use std::time::Duration;
 use zeroize::Zeroize;
 
 pub fn credentials_are_cached(real_sudo: &Path) -> Result<bool, String> {
@@ -26,6 +28,7 @@ pub fn authenticate_custom<F>(
     mut render_ui: F,
     feedback_char: char,
     attempts: u8,
+    error_delay_ms: u64,
 ) -> Result<(), String>
 where
     F: FnMut(&str, &str) -> Result<String, String>,
@@ -104,6 +107,11 @@ where
 
                 attempt += 1;
                 error_message = "Authentication failed, try again".to_string();
+                redraw_ui(&mut render_ui, &feedback, &error_message, start)?;
+                if error_delay_ms > 0 {
+                    thread::sleep(Duration::from_millis(error_delay_ms));
+                }
+                error_message.clear();
                 redraw_ui(&mut render_ui, &feedback, &error_message, start)?;
             }
             KeyCode::Char(ch) => {

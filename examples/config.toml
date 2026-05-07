@@ -11,6 +11,8 @@ real_sudo = "/usr/bin/sudo"
 mode = "custom"
 feedback_char = "*"
 attempts = 3
+# How long the error template stays visible before returning to the normal prompt.
+error_delay_ms = 3000
 
 [display]
 enabled = true

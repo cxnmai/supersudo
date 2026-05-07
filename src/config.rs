@@ -33,6 +33,7 @@ pub struct InputConfig {
     pub mode: InputMode,
     pub feedback_char: char,
     pub attempts: u8,
+    pub error_delay_ms: u64,
 }
 
 impl Default for InputConfig {
@@ -41,6 +42,7 @@ impl Default for InputConfig {
             mode: InputMode::Sudo,
             feedback_char: '*',
             attempts: 3,
+            error_delay_ms: 900,
         }
     }
 }
