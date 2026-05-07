@@ -2,6 +2,12 @@
 
 `supersudo` is an experimental Rust wrapper around the user's existing `sudo` installation. It provides configurable terminal UI, live password feedback, prompt states, and animations while delegating authentication, sudoers policy, credential caching, and command execution to the system `sudo` binary.
 
+<img width="1048" height="968" alt="githubgif1" src="https://github.com/user-attachments/assets/1cb40070-ef5d-4421-a375-b0d8a0a514e1" />
+
+
+<img width="1076" height="900" alt="githubgif2" src="https://github.com/user-attachments/assets/1ff6bb13-bf9d-400b-ac40-672af860287b" />
+
+
 ## Security model
 
 `supersudo` does **not** bundle or replace sudo.
@@ -52,6 +58,11 @@ Show help:
 
 ```bash
 supersudo --help
+```
+## Installation
+
+```bash
+cargo install --git https://github.com/cxnmai/supersudo.git
 ```
 
 ## Commands
