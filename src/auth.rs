@@ -1,5 +1,5 @@
-use crossterm::cursor::{Hide, RestorePosition, SavePosition, Show};
-use crossterm::event::{self, Event, KeyCode, KeyEventKind};
+use crossterm::cursor::{position, Hide, MoveTo, Show};
+use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 use crossterm::execute;
 use crossterm::terminal::{disable_raw_mode, enable_raw_mode, Clear, ClearType};
 use std::fs::OpenOptions;
@@ -57,25 +57,52 @@ where
         .open("/dev/tty")
         .map_err(|err| format!("failed to open /dev/tty for password input: {err}"))?;
 
+    let start = position().map_err(|err| format!("failed to get cursor position: {err}"))?;
     let mut stdout = io::stdout();
-    execute!(stdout, SavePosition, Hide)
-        .map_err(|err| format!("failed to save cursor position: {err}"))?;
+    execute!(stdout, Hide).map_err(|err| format!("failed to hide cursor: {err}"))?;
 
     let _guard = TerminalModeGuard::new()?;
     let mut password = Vec::new();
     let mut feedback = String::new();
+    redraw_ui(render_ui, &feedback, start)?;
 
     loop {
-        redraw_ui(render_ui, &feedback)?;
         let event = event::read().map_err(|err| format!("failed to read password input: {err}"))?;
         let Event::Key(key) = event else { continue };
         if key.kind != KeyEventKind::Press {
             continue;
         }
 
+        if key.modifiers.contains(KeyModifiers::CONTROL) {
+            match key.code {
+                KeyCode::Char('c') | KeyCode::Char('d') => {
+                    password.zeroize();
+                    return Err("password input cancelled".to_string());
+                }
+                KeyCode::Char('z') => {
+                    suspend_self()?;
+                    redraw_ui(render_ui, &feedback, start)?;
+                    continue;
+                }
+                KeyCode::Char('u') => {
+                    password.zeroize();
+                    password.clear();
+                    feedback.clear();
+                    redraw_ui(render_ui, &feedback, start)?;
+                    continue;
+                }
+                KeyCode::Char('w') => {
+                    pop_last_word(&mut password, &mut feedback);
+                    redraw_ui(render_ui, &feedback, start)?;
+                    continue;
+                }
+                _ => continue,
+            }
+        }
+
         match key.code {
             KeyCode::Enter => {
-                redraw_ui(render_ui, &feedback)?;
+                redraw_ui(render_ui, &feedback, start)?;
                 print!("\r\n");
                 io::stdout()
                     .flush()
@@ -83,14 +110,19 @@ where
                 break;
             }
             KeyCode::Char(ch) => {
+                if ch.is_control() {
+                    continue;
+                }
                 let mut buf = [0; 4];
                 password.extend_from_slice(ch.encode_utf8(&mut buf).as_bytes());
                 feedback.push(feedback_char);
+                redraw_ui(render_ui, &feedback, start)?;
             }
             KeyCode::Backspace => {
                 if !password.is_empty() {
                     pop_last_utf8_char(&mut password);
                     feedback.pop();
+                    redraw_ui(render_ui, &feedback, start)?;
                 }
             }
             KeyCode::Esc => {
@@ -104,19 +136,36 @@ where
     Ok(password)
 }
 
-fn redraw_ui<F>(render_ui: &mut F, feedback: &str) -> Result<(), String>
+fn redraw_ui<F>(render_ui: &mut F, feedback: &str, start: (u16, u16)) -> Result<(), String>
 where
     F: FnMut(&str) -> Result<String, String>,
 {
     let rendered = render_ui(feedback)?;
     let mut stdout = io::stdout();
-    execute!(stdout, RestorePosition, Clear(ClearType::FromCursorDown))
-        .map_err(|err| format!("failed to redraw password UI: {err}"))?;
+
+    execute!(stdout, MoveTo(start.0, start.1), Clear(ClearType::FromCursorDown))
+        .map_err(|err| format!("failed to prepare password UI redraw: {err}"))?;
+
     let rendered = rendered.replace('\n', "\r\n");
     stdout
         .write_all(rendered.as_bytes())
         .and_then(|_| stdout.flush())
         .map_err(|err| format!("failed to write password UI: {err}"))?;
+
+    Ok(())
+}
+
+fn suspend_self() -> Result<(), String> {
+    disable_raw_mode().map_err(|err| format!("failed to disable raw mode before suspend: {err}"))?;
+    execute!(io::stdout(), Show).map_err(|err| format!("failed to show cursor before suspend: {err}"))?;
+
+    let rc = unsafe { libc::raise(libc::SIGTSTP) };
+    if rc != 0 {
+        return Err("failed to suspend process".to_string());
+    }
+
+    enable_raw_mode().map_err(|err| format!("failed to re-enable raw mode after resume: {err}"))?;
+    execute!(io::stdout(), Hide).map_err(|err| format!("failed to hide cursor after resume: {err}"))?;
     Ok(())
 }
 
@@ -149,6 +198,18 @@ fn validate_password(real_sudo: &Path, password: &[u8]) -> Result<bool, String> 
         .map_err(|err| format!("failed waiting for sudo validation: {err}"))?;
 
     Ok(status.success())
+}
+
+fn pop_last_word(password: &mut Vec<u8>, feedback: &mut String) {
+    while !password.is_empty() && password.last().is_some_and(|b| b.is_ascii_whitespace()) {
+        pop_last_utf8_char(password);
+        feedback.pop();
+    }
+
+    while !password.is_empty() && password.last().is_some_and(|b| !b.is_ascii_whitespace()) {
+        pop_last_utf8_char(password);
+        feedback.pop();
+    }
 }
 
 fn pop_last_utf8_char(bytes: &mut Vec<u8>) {

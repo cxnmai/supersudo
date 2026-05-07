@@ -61,8 +61,11 @@ impl Default for InputMode {
 #[derive(Debug, Deserialize)]
 pub struct DisplayConfig {
     pub enabled: bool,
+    #[serde(default)]
     pub template: String,
+    pub template_file: Option<PathBuf>,
     pub authenticated_template: Option<String>,
+    pub authenticated_template_file: Option<PathBuf>,
 }
 
 impl Default for DisplayConfig {
@@ -70,7 +73,9 @@ impl Default for DisplayConfig {
         Self {
             enabled: false,
             template: String::new(),
+            template_file: None,
             authenticated_template: None,
+            authenticated_template_file: None,
         }
     }
 }
@@ -106,12 +111,49 @@ fn load_required(path: PathBuf) -> Result<LoadedConfig, String> {
     let contents = fs::read_to_string(&path)
         .map_err(|err| format!("failed to read config {}: {err}", path.display()))?;
 
-    let config = toml::from_str::<Config>(&contents)
+    let mut config = toml::from_str::<Config>(&contents)
         .map_err(|err| format!("failed to parse config {}: {err}", path.display()))?;
+
+    load_external_templates(&mut config, &path)?;
 
     Ok(LoadedConfig {
         config,
         path: Some(path),
+    })
+}
+
+fn load_external_templates(config: &mut Config, config_path: &Path) -> Result<(), String> {
+    if let Some(path) = &config.display.template_file {
+        config.display.template = read_template_file(config_path, path, "display.template_file")?;
+    }
+
+    if let Some(path) = &config.display.authenticated_template_file {
+        config.display.authenticated_template = Some(read_template_file(
+            config_path,
+            path,
+            "display.authenticated_template_file",
+        )?);
+    }
+
+    Ok(())
+}
+
+fn read_template_file(config_path: &Path, template_path: &Path, field: &str) -> Result<String, String> {
+    let path = if template_path.is_absolute() {
+        template_path.to_path_buf()
+    } else {
+        config_path
+            .parent()
+            .unwrap_or_else(|| Path::new("."))
+            .join(template_path)
+    };
+
+    fs::read_to_string(&path).map_err(|err| {
+        format!(
+            "failed to read {field} {} resolved from config {}: {err}",
+            path.display(),
+            config_path.display()
+        )
     })
 }
 
