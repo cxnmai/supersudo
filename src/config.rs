@@ -18,11 +18,46 @@ pub struct Config {
 
     #[serde(default)]
     pub styles: HashMap<String, String>,
+
+    #[serde(default)]
+    pub input: InputConfig,
 }
 
 #[derive(Debug, Default, Deserialize)]
 pub struct GeneralConfig {
     pub real_sudo: Option<PathBuf>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct InputConfig {
+    pub mode: InputMode,
+    pub prompt: String,
+    pub feedback_char: char,
+    pub attempts: u8,
+}
+
+impl Default for InputConfig {
+    fn default() -> Self {
+        Self {
+            mode: InputMode::Sudo,
+            prompt: "Password: ".to_string(),
+            feedback_char: '*',
+            attempts: 3,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum InputMode {
+    Sudo,
+    Custom,
+}
+
+impl Default for InputMode {
+    fn default() -> Self {
+        Self::Sudo
+    }
 }
 
 #[derive(Debug, Deserialize)]

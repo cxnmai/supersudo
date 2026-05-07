@@ -4,6 +4,11 @@ use std::env;
 use std::io::{self, IsTerminal, Write};
 use unicode_width::UnicodeWidthStr;
 
+pub fn render_input_prompt(config: &Config, sudo_args: &[String]) -> Result<String, String> {
+    let vars = template_vars(sudo_args);
+    render_template(&config.input.prompt, &config.styles, &vars)
+}
+
 pub fn render_pre_prompt(config: &Config, sudo_args: &[String]) -> Result<(), String> {
     if !config.display.enabled || !io::stdout().is_terminal() {
         return Ok(());

@@ -1,3 +1,4 @@
+mod auth;
 mod config;
 mod render;
 
@@ -38,9 +39,39 @@ fn main() {
         std::process::exit(2);
     }
 
-    // Suppress sudo's default `[sudo] password for user:` prompt unless the user
-    // explicitly provided their own sudo prompt via `-p` / `--prompt`.
-    let sudo_args = with_default_empty_prompt(invocation.sudo_args);
+    let mut sudo_args = with_default_empty_prompt(invocation.sudo_args);
+
+    if loaded_config.config.input.mode == config::InputMode::Custom {
+        match auth::credentials_are_cached(&real_sudo) {
+            Ok(true) => {}
+            Ok(false) => {
+                let input_prompt = match render::render_input_prompt(&loaded_config.config, &sudo_args) {
+                    Ok(prompt) => prompt,
+                    Err(err) => {
+                        eprintln!("supersudo: {err}");
+                        std::process::exit(2);
+                    }
+                };
+
+                if let Err(err) = auth::authenticate_custom(
+                    &real_sudo,
+                    &input_prompt,
+                    loaded_config.config.input.feedback_char,
+                    loaded_config.config.input.attempts,
+                ) {
+                    eprintln!("supersudo: {err}");
+                    std::process::exit(1);
+                }
+            }
+            Err(err) => {
+                eprintln!("supersudo: {err}");
+                std::process::exit(1);
+            }
+        }
+
+        // After custom validation, do not allow sudo to prompt again.
+        sudo_args.insert(0, "-n".to_string());
+    }
 
     let err = Command::new(&real_sudo).args(sudo_args).exec();
 

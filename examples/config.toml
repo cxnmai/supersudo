@@ -5,6 +5,14 @@
 # if `sudo` is aliased or shimmed to `supersudo`.
 real_sudo = "/usr/bin/sudo"
 
+[input]
+# "sudo" lets real sudo read the password. "custom" lets supersudo read it,
+# show live feedback, validate with `sudo -S -p "" -v`, then run with `sudo -n`.
+mode = "custom"
+prompt = "{style:label}password:{reset} "
+feedback_char = "*"
+attempts = 3
+
 [display]
 enabled = true
 template = """
