@@ -2,13 +2,15 @@ use crossterm::cursor::{Hide, MoveTo, MoveToColumn, MoveUp, Show, position};
 use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 use crossterm::execute;
 use crossterm::terminal::{Clear, ClearType, disable_raw_mode, enable_raw_mode};
+use secrets::SecretBox;
 use std::fs::OpenOptions;
 use std::io::{self, Write};
 use std::path::Path;
 use std::process::{Command, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
-use zeroize::Zeroize;
+
+const MAX_PASSWORD_BYTES: usize = 1024;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PromptState {
@@ -52,7 +54,7 @@ where
         .open("/dev/tty")
         .map_err(|err| format!("failed to open /dev/tty for password input: {err}"))?;
 
-    let mut password = Vec::new();
+    let mut password = PasswordBuffer::new();
     let mut feedback = String::new();
     let start = reserve_redraw_region(
         &mut render_ui,
@@ -116,7 +118,7 @@ where
         if key.modifiers.contains(KeyModifiers::CONTROL) {
             match key.code {
                 KeyCode::Char('c') | KeyCode::Char('d') => {
-                    password.zeroize();
+                    password.clear();
                     return Err("password input cancelled".to_string());
                 }
                 KeyCode::Char('z') => {
@@ -132,7 +134,6 @@ where
                     continue;
                 }
                 KeyCode::Char('u') => {
-                    password.zeroize();
                     password.clear();
                     feedback.clear();
                     redraw_ui(
@@ -146,7 +147,10 @@ where
                     continue;
                 }
                 KeyCode::Char('w') => {
-                    pop_last_word(&mut password, &mut feedback);
+                    let removed = password.pop_word();
+                    for _ in 0..removed {
+                        feedback.pop();
+                    }
                     redraw_ui(
                         &mut render_ui,
                         &feedback,
@@ -163,8 +167,7 @@ where
 
         match key.code {
             KeyCode::Enter => {
-                let ok = validate_password(real_sudo, &password);
-                password.zeroize();
+                let ok = password.with_bytes(|bytes| validate_password(real_sudo, bytes));
                 password.clear();
                 feedback.clear();
 
@@ -213,8 +216,7 @@ where
                 if ch.is_control() {
                     continue;
                 }
-                let mut buf = [0; 4];
-                password.extend_from_slice(ch.encode_utf8(&mut buf).as_bytes());
+                password.push_char(ch)?;
                 feedback.push(feedback_char);
                 redraw_ui(
                     &mut render_ui,
@@ -226,7 +228,7 @@ where
                 )?;
             }
             KeyCode::Backspace if !password.is_empty() => {
-                pop_last_utf8_char(&mut password);
+                password.pop_char();
                 feedback.pop();
                 redraw_ui(
                     &mut render_ui,
@@ -238,7 +240,7 @@ where
                 )?;
             }
             KeyCode::Esc => {
-                password.zeroize();
+                password.clear();
                 return Err("password input cancelled".to_string());
             }
             _ => {}
@@ -379,26 +381,6 @@ fn validate_password(real_sudo: &Path, password: &[u8]) -> Result<bool, String> 
     Ok(status.success())
 }
 
-fn pop_last_word(password: &mut Vec<u8>, feedback: &mut String) {
-    while !password.is_empty() && password.last().is_some_and(|b| b.is_ascii_whitespace()) {
-        pop_last_utf8_char(password);
-        feedback.pop();
-    }
-
-    while !password.is_empty() && password.last().is_some_and(|b| !b.is_ascii_whitespace()) {
-        pop_last_utf8_char(password);
-        feedback.pop();
-    }
-}
-
-fn pop_last_utf8_char(bytes: &mut Vec<u8>) {
-    while let Some(byte) = bytes.pop() {
-        if byte & 0b1100_0000 != 0b1000_0000 {
-            break;
-        }
-    }
-}
-
 struct TerminalModeGuard;
 
 impl TerminalModeGuard {
@@ -412,5 +394,190 @@ impl Drop for TerminalModeGuard {
     fn drop(&mut self) {
         let _ = disable_raw_mode();
         let _ = execute!(io::stdout(), Show);
+    }
+}
+
+struct PasswordBuffer {
+    secret: SecretBox<[u8; MAX_PASSWORD_BYTES]>,
+    len: usize,
+}
+
+impl PasswordBuffer {
+    fn new() -> Self {
+        Self {
+            secret: SecretBox::zero(),
+            len: 0,
+        }
+    }
+
+    fn is_empty(&self) -> bool {
+        self.len == 0
+    }
+
+    fn push_char(&mut self, ch: char) -> Result<(), String> {
+        let mut encoded = [0; 4];
+        let encoded = ch.encode_utf8(&mut encoded).as_bytes();
+        let end = self
+            .len
+            .checked_add(encoded.len())
+            .ok_or_else(|| "password is too long".to_string())?;
+
+        if end > MAX_PASSWORD_BYTES {
+            return Err(format!(
+                "password is too long; maximum is {MAX_PASSWORD_BYTES} bytes"
+            ));
+        }
+
+        {
+            let mut secret = self.secret.borrow_mut();
+            secret[self.len..end].copy_from_slice(encoded);
+        }
+        self.len = end;
+        Ok(())
+    }
+
+    fn pop_char(&mut self) -> bool {
+        let Some(start) = self.last_char_start() else {
+            return false;
+        };
+        self.zero_range(start, self.len);
+        self.len = start;
+        true
+    }
+
+    fn pop_word(&mut self) -> usize {
+        let mut removed = 0;
+
+        while self
+            .last_byte()
+            .is_some_and(|byte| byte.is_ascii_whitespace())
+        {
+            if self.pop_char() {
+                removed += 1;
+            }
+        }
+
+        while self
+            .last_byte()
+            .is_some_and(|byte| !byte.is_ascii_whitespace())
+        {
+            if self.pop_char() {
+                removed += 1;
+            }
+        }
+
+        removed
+    }
+
+    fn clear(&mut self) {
+        self.zero_range(0, self.len);
+        self.len = 0;
+    }
+
+    fn with_bytes<T>(&self, f: impl FnOnce(&[u8]) -> T) -> T {
+        let secret = self.secret.borrow();
+        f(&secret[..self.len])
+    }
+
+    fn last_byte(&self) -> Option<u8> {
+        if self.len == 0 {
+            return None;
+        }
+
+        self.with_bytes(|bytes| bytes.last().copied())
+    }
+
+    fn last_char_start(&self) -> Option<usize> {
+        if self.len == 0 {
+            return None;
+        }
+
+        self.with_bytes(|bytes| {
+            let mut start = bytes.len() - 1;
+            while start > 0 && bytes[start] & 0b1100_0000 == 0b1000_0000 {
+                start -= 1;
+            }
+            Some(start)
+        })
+    }
+
+    fn zero_range(&mut self, start: usize, end: usize) {
+        if start >= end {
+            return;
+        }
+
+        let mut secret = self.secret.borrow_mut();
+        secret[start..end].fill(0);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{MAX_PASSWORD_BYTES, PasswordBuffer};
+
+    #[test]
+    fn password_buffer_appends_ascii() {
+        let mut password = PasswordBuffer::new();
+
+        password.push_char('a').unwrap();
+        password.push_char('b').unwrap();
+
+        password.with_bytes(|bytes| assert_eq!(bytes, b"ab"));
+    }
+
+    #[test]
+    fn password_buffer_appends_multibyte_utf8() {
+        let mut password = PasswordBuffer::new();
+
+        password.push_char('a').unwrap();
+        password.push_char('é').unwrap();
+
+        password.with_bytes(|bytes| assert_eq!(bytes, "aé".as_bytes()));
+    }
+
+    #[test]
+    fn password_buffer_backspace_removes_one_utf8_char() {
+        let mut password = PasswordBuffer::new();
+
+        password.push_char('a').unwrap();
+        password.push_char('é').unwrap();
+        assert!(password.pop_char());
+
+        password.with_bytes(|bytes| assert_eq!(bytes, b"a"));
+    }
+
+    #[test]
+    fn password_buffer_pop_word_removes_trailing_word_and_whitespace() {
+        let mut password = PasswordBuffer::new();
+
+        for ch in "alpha beta  ".chars() {
+            password.push_char(ch).unwrap();
+        }
+
+        assert_eq!(password.pop_word(), 6);
+        password.with_bytes(|bytes| assert_eq!(bytes, b"alpha "));
+    }
+
+    #[test]
+    fn password_buffer_clear_removes_visible_contents() {
+        let mut password = PasswordBuffer::new();
+
+        password.push_char('x').unwrap();
+        password.clear();
+
+        assert!(password.is_empty());
+        password.with_bytes(|bytes| assert!(bytes.is_empty()));
+    }
+
+    #[test]
+    fn password_buffer_rejects_overflow() {
+        let mut password = PasswordBuffer::new();
+
+        for _ in 0..MAX_PASSWORD_BYTES {
+            password.push_char('x').unwrap();
+        }
+
+        assert!(password.push_char('x').is_err());
+        password.with_bytes(|bytes| assert_eq!(bytes.len(), MAX_PASSWORD_BYTES));
     }
 }

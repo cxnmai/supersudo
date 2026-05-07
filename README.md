@@ -40,6 +40,10 @@ If validation succeeds, it runs the requested command with:
 
 In custom mode, the password is never passed through args, env vars, config files, temp files, or shell commands. It is sent only through sudo stdin and zeroized after validation/cancellation.
 
+During custom password entry, `supersudo` stores the password in a fixed-size protected memory allocation using the Rust `secrets` crate rather than a growable heap buffer. This avoids heap reallocations that could leave stale password prefixes behind. The protected allocation is locked with `mlock(2)`, guarded, inaccessible outside explicit borrow scopes with `mprotect(2)`, and zeroed when released on supported Unix targets.
+
+This is still best-effort userspace protection. Custom mode necessarily exposes the password to the `supersudo` process while typing and validating it, and cannot eliminate exposure through terminal/kernel buffers, sudo stdin, root/debugger access, process compromise, or abnormal termination such as `SIGKILL`.
+
 ## Usage
 
 Run a command through supersudo:
