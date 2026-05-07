@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::env;
@@ -90,7 +88,6 @@ pub struct DisplayConfig {
 #[derive(Debug)]
 pub struct LoadedConfig {
     pub config: Config,
-    pub path: Option<PathBuf>,
 }
 
 pub fn load(cli_path: Option<PathBuf>) -> Result<LoadedConfig, String> {
@@ -110,7 +107,6 @@ pub fn load(cli_path: Option<PathBuf>) -> Result<LoadedConfig, String> {
 
     Ok(LoadedConfig {
         config: Config::default(),
-        path: None,
     })
 }
 
@@ -124,10 +120,7 @@ fn load_required(path: PathBuf) -> Result<LoadedConfig, String> {
     load_external_templates(&mut config, &path)?;
     load_external_animations(&mut config, &path)?;
 
-    Ok(LoadedConfig {
-        config,
-        path: Some(path),
-    })
+    Ok(LoadedConfig { config })
 }
 
 fn load_external_animations(config: &mut Config, config_path: &Path) -> Result<(), String> {
