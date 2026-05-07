@@ -7,6 +7,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 pub const CONFIG_ENV: &str = "SUPERSUDO_CONFIG";
+const MAX_EXTERNAL_FILE_BYTES: u64 = 1024 * 1024;
 
 #[derive(Debug, Default, Deserialize)]
 pub struct Config {
@@ -212,6 +213,22 @@ fn read_template_file(
             .join(template_path)
     };
 
+    let metadata = fs::metadata(&path).map_err(|err| {
+        format!(
+            "failed to inspect {field} {} resolved from config {}: {err}",
+            path.display(),
+            config_path.display()
+        )
+    })?;
+
+    if metadata.len() > MAX_EXTERNAL_FILE_BYTES {
+        return Err(format!(
+            "refusing to read {field} {}: file is larger than {} bytes",
+            path.display(),
+            MAX_EXTERNAL_FILE_BYTES
+        ));
+    }
+
     fs::read_to_string(&path).map_err(|err| {
         format!(
             "failed to read {field} {} resolved from config {}: {err}",
@@ -221,13 +238,23 @@ fn read_template_file(
     })
 }
 
+pub fn default_user_config_path() -> Result<PathBuf, String> {
+    if let Some(xdg) = env::var_os("XDG_CONFIG_HOME") {
+        return Ok(PathBuf::from(xdg).join("supersudo/config.toml"));
+    }
+
+    if let Some(home) = home_dir() {
+        return Ok(home.join(".config/supersudo/config.toml"));
+    }
+
+    Err("could not determine user config path: neither XDG_CONFIG_HOME nor HOME is set".to_string())
+}
+
 fn default_config_candidates() -> Vec<PathBuf> {
     let mut paths = Vec::new();
 
-    if let Some(xdg) = env::var_os("XDG_CONFIG_HOME") {
-        paths.push(PathBuf::from(xdg).join("supersudo/config.toml"));
-    } else if let Some(home) = home_dir() {
-        paths.push(home.join(".config/supersudo/config.toml"));
+    if let Ok(path) = default_user_config_path() {
+        paths.push(path);
     }
 
     paths.push(PathBuf::from("/etc/supersudo/config.toml"));

@@ -1,6 +1,9 @@
 mod auth;
+mod cli;
 mod config;
 mod render;
+mod setup;
+mod shell;
 
 use std::env;
 use std::os::unix::process::CommandExt;
@@ -10,11 +13,64 @@ use std::process::Command;
 const REAL_SUDO_ENV: &str = "SUPERSUDO_REAL_SUDO";
 
 fn main() {
-    let invocation = match parse_supersudo_args() {
-        Ok(invocation) => invocation,
+    let action = match cli::parse_args(env::args().skip(1)) {
+        Ok(action) => action,
         Err(err) => {
             eprintln!("supersudo: {err}");
             std::process::exit(2);
+        }
+    };
+
+    let invocation = match action {
+        cli::CliAction::Run {
+            config_path,
+            sudo_args,
+        } => Invocation {
+            config_path,
+            sudo_args,
+        },
+        cli::CliAction::ConfigInit { force } => match cli::init_config(force) {
+            Ok(path) => {
+                println!("Created config: {}", path.display());
+                return;
+            }
+            Err(err) => {
+                eprintln!("supersudo: {err}");
+                std::process::exit(1);
+            }
+        },
+        cli::CliAction::PathInit => match shell::init_alias() {
+            Ok(path) => {
+                println!("Added sudo alias to: {}", path.display());
+                println!("Restart your shell or source the file for it to take effect.");
+                return;
+            }
+            Err(err) => {
+                eprintln!("supersudo: {err}");
+                std::process::exit(1);
+            }
+        },
+        cli::CliAction::PathRemove => match shell::remove_alias() {
+            Ok(path) => {
+                println!("Removed sudo alias from: {}", path.display());
+                println!("Restart your shell or source the file for it to take effect.");
+                return;
+            }
+            Err(err) => {
+                eprintln!("supersudo: {err}");
+                std::process::exit(1);
+            }
+        },
+        cli::CliAction::Setup => match setup::run() {
+            Ok(()) => return,
+            Err(err) => {
+                eprintln!("supersudo: {err}");
+                std::process::exit(1);
+            }
+        },
+        cli::CliAction::Help => {
+            cli::print_help();
+            return;
         }
     };
 
@@ -122,40 +178,6 @@ fn main() {
 struct Invocation {
     config_path: Option<PathBuf>,
     sudo_args: Vec<String>,
-}
-
-fn parse_supersudo_args() -> Result<Invocation, String> {
-    let mut args = env::args().skip(1);
-    let mut config_path = None;
-    let mut sudo_args = Vec::new();
-
-    while let Some(arg) = args.next() {
-        match arg.as_str() {
-            "--" => {
-                sudo_args.extend(args);
-                break;
-            }
-            "--config" => {
-                let path = args
-                    .next()
-                    .ok_or_else(|| "--config requires a path".to_string())?;
-                config_path = Some(PathBuf::from(path));
-            }
-            _ if arg.starts_with("--config=") => {
-                config_path = Some(PathBuf::from(arg.trim_start_matches("--config=")));
-            }
-            _ => {
-                sudo_args.push(arg);
-                sudo_args.extend(args);
-                break;
-            }
-        }
-    }
-
-    Ok(Invocation {
-        config_path,
-        sudo_args,
-    })
 }
 
 fn with_default_empty_prompt(args: Vec<String>) -> Vec<String> {

@@ -1,173 +1,214 @@
 # supersudo
 
-`supersudo` is an experimental Rust wrapper around the user's existing `sudo` installation.
+`supersudo` is an experimental Rust wrapper around the user's existing `sudo` installation. It provides configurable terminal UI, live password feedback, prompt states, and animations while delegating authentication, sudoers policy, credential caching, and command execution to the system `sudo` binary.
 
-The goal is to eventually provide richer sudo prompt customization while still delegating authentication, policy, updates, and command execution to the system-provided `sudo` binary.
+## Security model
 
-## Current status
+`supersudo` does **not** bundle or replace sudo.
 
-Implemented so far:
+There are two input modes:
 
-- Transparent wrapping of the real `sudo`
-- Config file loading from several locations
-- Configurable real sudo path
-- Recursion protection so `supersudo` does not accidentally call itself
-- Example config for testing
-
-Prompt customization and UI features are planned but not implemented yet.
-
-## How wrapping works
-
-At the moment, `supersudo` simply forwards arguments to the real sudo binary.
-
-For example:
-
-```bash
-supersudo apt update
+```toml
+[input]
+mode = "sudo"
 ```
 
-executes roughly as:
+Real sudo reads the password. This is the safest mode, but live password feedback/animations during typing are not available.
 
-```bash
-/usr/bin/sudo apt update
+```toml
+[input]
+mode = "custom"
 ```
 
-The wrapper uses Unix `exec`, meaning the `supersudo` process is replaced by the real `sudo` process instead of staying around as a parent process.
+`supersudo` reads the password to render live feedback and animated UI, then validates it with:
 
-## Real sudo resolution
+```bash
+/usr/bin/sudo -S -p "" -v
+```
 
-`supersudo` does **not** bundle sudo.
+If validation succeeds, it runs the requested command with:
 
-It resolves the real sudo path using this order:
+```bash
+/usr/bin/sudo -n ...
+```
 
-1. Config file:
+In custom mode, the password is never passed through args, env vars, config files, temp files, or shell commands. It is sent only through sudo stdin and zeroized after validation/cancellation.
 
-   ```toml
-   [general]
-   real_sudo = "/usr/bin/sudo"
-   ```
+## Usage
 
-2. Environment variable:
+Run a command through supersudo:
 
-   ```bash
-   SUPERSUDO_REAL_SUDO=/usr/bin/sudo supersudo apt update
-   ```
+```bash
+supersudo whoami
+```
 
-3. Built-in candidates:
+Use a specific config:
 
-   ```text
-   /usr/bin/sudo
-   /bin/sudo
-   /usr/local/bin/sudo
-   ```
+```bash
+supersudo --config examples/config.toml -- whoami
+```
 
-The selected path must be an absolute file path. `supersudo` also checks that the selected sudo path does not point back to the current `supersudo` executable.
+Show help:
 
-## Configuration
+```bash
+supersudo --help
+```
 
-Config files are TOML.
+## Commands
 
-Config precedence, from highest to lowest:
+```bash
+supersudo setup
+```
 
-1. CLI flag:
+Interactive setup for config creation and optional sudo alias installation.
 
-   ```bash
-   supersudo --config /path/to/config.toml -- apt update
-   ```
+```bash
+supersudo config init
+supersudo config init --force
+```
 
-2. Environment variable:
+Create or overwrite the default user config at:
 
-   ```bash
-   SUPERSUDO_CONFIG=/path/to/config.toml supersudo apt update
-   ```
+```text
+${XDG_CONFIG_HOME:-~/.config}/supersudo/config.toml
+```
 
-3. User config via XDG:
+```bash
+supersudo path init
+supersudo path remove
+```
 
-   ```text
-   $XDG_CONFIG_HOME/supersudo/config.toml
-   ```
+Add/remove this marked shell alias block:
 
-4. User config fallback:
+```sh
+# >>> supersudo alias >>>
+alias sudo='supersudo'
+# <<< supersudo alias <<<
+```
 
-   ```text
-   ~/.config/supersudo/config.toml
-   ```
+Supported shell config targets:
 
-5. System config:
+- bash: `~/.bashrc`
+- zsh: `~/.zshrc`
+- unknown shell: `~/.profile`
 
-   ```text
-   /etc/supersudo/config.toml
-   ```
+Override with:
 
+```bash
+SUPERSUDO_SHELL_CONFIG=/path/to/rc supersudo path init
+```
+
+## Config loading
+
+Config precedence:
+
+1. `--config /path/to/config.toml`
+2. `SUPERSUDO_CONFIG=/path/to/config.toml`
+3. `$XDG_CONFIG_HOME/supersudo/config.toml`
+4. `~/.config/supersudo/config.toml`
+5. `/etc/supersudo/config.toml`
 6. Built-in defaults
 
-If no config file exists, no file or directory is created automatically. Built-in defaults are used instead.
+Normal command runs do not create config files automatically.
 
-## Current config schema
+## Config example
 
-```toml
-[general]
-real_sudo = "/usr/bin/sudo"
-
-[prompt]
-template = "Password: "
-
-[ui]
-enabled = true
-```
-
-Currently, only this field is actively used:
-
-```toml
-[general]
-real_sudo = "/usr/bin/sudo"
-```
-
-The `[prompt]` and `[ui]` sections exist as placeholders for upcoming customization work.
-
-## Test config
-
-A test config lives at:
+See:
 
 ```text
 examples/config.toml
+examples/templates/password.txt
+examples/templates/error.txt
+examples/templates/success.txt
+examples/animations/loading_bar.txt
 ```
 
-You can test config loading with:
+## Templates
 
-```bash
-cargo run -- --config examples/config.toml -- -V
+Templates support variables:
+
+```text
+{user}
+{host}
+{cwd}
+{command}
+{password}
+{error}
+{success}
+{animation:name}
 ```
 
-This should execute the real sudo with `-V`.
+Padding/truncation:
 
-## Development
-
-Check the project with:
-
-```bash
-cargo check
+```text
+{command:pad=28}
+{animation:loading_bar:pad=28}
+{lit:Authentication required:pad=39}
 ```
 
-Run it with:
+Styles:
 
-```bash
-cargo run -- <sudo args>
+```text
+{style:title}
+{reset}
 ```
 
 Example:
 
-```bash
-cargo run -- -V
+```toml
+[styles]
+title = "bold yellow"
+value = "bright_white"
+error = "bold bright_red"
 ```
 
-## Planned next steps
+## External template files
 
-Possible next features:
+Long prompts can live in separate files:
 
-- Render a custom sudo prompt from the `[prompt]` template
-- Add variables such as `{user}`, `{host}`, `{cwd}`, and `{command}`
-- Carefully handle existing sudo prompt flags like `-p` / `--prompt`
-- Add shell integration so users can type `sudo` but route through `supersudo`
-- Add an init command to create `~/.config/supersudo/config.toml`
-- Add optional pre-prompt terminal UI or animations
+```toml
+[display]
+template_file = "templates/password.txt"
+error_template_file = "templates/error.txt"
+success_template_file = "templates/success.txt"
+```
+
+Relative paths are resolved relative to the config file. External template/animation files larger than 1 MiB are rejected.
+
+## Animations
+
+Animations must be external files:
+
+```toml
+[animations]
+loading_bar = "animations/loading_bar.txt"
+
+[animation_speeds]
+loading_bar = 80
+```
+
+Use in templates:
+
+```text
+{animation:loading_bar}
+```
+
+Animation file formats:
+
+- one frame per line, or
+- multi-line frames separated by a line containing `---`
+
+## Development
+
+```bash
+cargo fmt
+cargo check
+cargo clippy -- -D warnings
+cargo test
+```
+
+## Caveats
+
+- `mode = "custom"` is security-sensitive because `supersudo` sees the password.
+- Terminal state is restored on normal exits, but no program can recover from `SIGKILL`.
+- Do not use untrusted configs/templates; they can display arbitrary terminal text.
