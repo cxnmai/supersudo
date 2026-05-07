@@ -46,7 +46,12 @@ fn main() {
 
     if loaded_config.config.input.mode == config::InputMode::Custom {
         match auth::credentials_are_cached(&real_sudo) {
-            Ok(true) => {}
+            Ok(true) => {
+                if let Err(err) = render::render_authenticated_display(&loaded_config.config, &display_args) {
+                    eprintln!("supersudo: {err}");
+                    std::process::exit(2);
+                }
+            }
             Ok(false) => {
                 let render_password_ui = |password_feedback: &str| {
                     let mut extra = std::collections::HashMap::new();

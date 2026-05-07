@@ -25,6 +25,10 @@ template = """
 {style:corner}╰{style:line}────────────────────────────────────────{style:corner}╯{reset}
 """
 
+authenticated_template = """
+{style:ok}Authenticated!{reset} {style:label}using cached sudo credentials for{reset} {style:value}{command}{reset}
+"""
+
 [styles]
 corner = "bold bright_magenta"
 line = "bright_blue"
@@ -32,3 +36,4 @@ side = "bright_magenta"
 title = "bold yellow"
 label = "dim white"
 value = "bright_white"
+ok = "bold bright_green"

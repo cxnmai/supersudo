@@ -62,6 +62,7 @@ impl Default for InputMode {
 pub struct DisplayConfig {
     pub enabled: bool,
     pub template: String,
+    pub authenticated_template: Option<String>,
 }
 
 impl Default for DisplayConfig {
@@ -69,6 +70,7 @@ impl Default for DisplayConfig {
         Self {
             enabled: false,
             template: String::new(),
+            authenticated_template: None,
         }
     }
 }

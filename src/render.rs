@@ -9,9 +9,31 @@ pub fn render_display(
     sudo_args: &[String],
     extra_vars: &HashMap<String, String>,
 ) -> Result<String, String> {
+    render_named_template(&config.display.template, config, sudo_args, extra_vars)
+}
+
+pub fn render_authenticated_display(config: &Config, sudo_args: &[String]) -> Result<(), String> {
+    if !config.display.enabled || !io::stdout().is_terminal() {
+        return Ok(());
+    }
+
+    let Some(template) = &config.display.authenticated_template else {
+        return Ok(());
+    };
+
+    let rendered = render_named_template(template, config, sudo_args, &HashMap::new())?;
+    write_rendered(&rendered)
+}
+
+fn render_named_template(
+    template: &str,
+    config: &Config,
+    sudo_args: &[String],
+    extra_vars: &HashMap<String, String>,
+) -> Result<String, String> {
     let mut vars = template_vars(sudo_args);
     vars.extend(extra_vars.clone());
-    render_template(&config.display.template, &config.styles, &vars)
+    render_template(template, &config.styles, &vars)
 }
 
 pub fn render_pre_prompt(config: &Config, sudo_args: &[String]) -> Result<(), String> {
@@ -21,6 +43,10 @@ pub fn render_pre_prompt(config: &Config, sudo_args: &[String]) -> Result<(), St
 
     let rendered = render_display(config, sudo_args, &HashMap::new())?;
 
+    write_rendered(&rendered)
+}
+
+fn write_rendered(rendered: &str) -> Result<(), String> {
     let mut stdout = io::stdout();
     stdout
         .write_all(rendered.as_bytes())
