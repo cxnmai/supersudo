@@ -39,8 +39,9 @@ pub fn authenticate_custom<F>(
     success_delay_ms: u64,
 ) -> Result<(), String>
 where
-    F: FnMut(&str, PromptState, &str) -> Result<String, String>,
+    F: FnMut(&str, PromptState, &str, u128) -> Result<String, String>,
 {
+    let animation_start = Instant::now();
     let attempts = attempts.max(1);
     let mut message = String::new();
     let mut attempt = 1;
@@ -53,28 +54,29 @@ where
 
     let mut password = Vec::new();
     let mut feedback = String::new();
-    let start = reserve_redraw_region(&mut render_ui, &feedback, PromptState::Normal, &message)?;
+    let start = reserve_redraw_region(&mut render_ui, &feedback, PromptState::Normal, &message, animation_start)?;
 
     let mut stdout = io::stdout();
     execute!(stdout, Hide).map_err(|err| format!("failed to hide cursor: {err}"))?;
 
     let _guard = TerminalModeGuard::new()?;
     let mut error_until: Option<Instant> = None;
-    redraw_ui(&mut render_ui, &feedback, prompt_state(error_until), &message, start)?;
+    redraw_ui(&mut render_ui, &feedback, prompt_state(error_until), &message, start, animation_start)?;
 
     loop {
         let state = prompt_state(error_until);
         if state == PromptState::Normal && !message.is_empty() {
             message.clear();
             error_until = None;
-            redraw_ui(&mut render_ui, &feedback, prompt_state(error_until), &message, start)?;
+            redraw_ui(&mut render_ui, &feedback, prompt_state(error_until), &message, start, animation_start)?;
         }
 
         let timeout = error_until
             .and_then(|until| until.checked_duration_since(Instant::now()))
-            .unwrap_or_else(|| Duration::from_millis(250));
+            .unwrap_or_else(|| Duration::from_millis(80));
 
         if !event::poll(timeout).map_err(|err| format!("failed to poll password input: {err}"))? {
+            redraw_ui(&mut render_ui, &feedback, prompt_state(error_until), &message, start, animation_start)?;
             continue;
         }
 
@@ -92,19 +94,19 @@ where
                 }
                 KeyCode::Char('z') => {
                     suspend_self()?;
-                    redraw_ui(&mut render_ui, &feedback, prompt_state(error_until), &message, start)?;
+                    redraw_ui(&mut render_ui, &feedback, prompt_state(error_until), &message, start, animation_start)?;
                     continue;
                 }
                 KeyCode::Char('u') => {
                     password.zeroize();
                     password.clear();
                     feedback.clear();
-                    redraw_ui(&mut render_ui, &feedback, prompt_state(error_until), &message, start)?;
+                    redraw_ui(&mut render_ui, &feedback, prompt_state(error_until), &message, start, animation_start)?;
                     continue;
                 }
                 KeyCode::Char('w') => {
                     pop_last_word(&mut password, &mut feedback);
-                    redraw_ui(&mut render_ui, &feedback, prompt_state(error_until), &message, start)?;
+                    redraw_ui(&mut render_ui, &feedback, prompt_state(error_until), &message, start, animation_start)?;
                     continue;
                 }
                 _ => continue,
@@ -120,7 +122,7 @@ where
 
                 if ok? {
                     message = "Authentication successful".to_string();
-                    redraw_ui(&mut render_ui, &feedback, PromptState::Success, &message, start)?;
+                    redraw_ui(&mut render_ui, &feedback, PromptState::Success, &message, start, animation_start)?;
                     if success_delay_ms > 0 {
                         thread::sleep(Duration::from_millis(success_delay_ms));
                     }
@@ -129,14 +131,14 @@ where
 
                 if attempt >= attempts {
                     message = "Authentication failed".to_string();
-                    redraw_ui(&mut render_ui, &feedback, PromptState::Error, &message, start)?;
+                    redraw_ui(&mut render_ui, &feedback, PromptState::Error, &message, start, animation_start)?;
                     return Err("authentication failed".to_string());
                 }
 
                 attempt += 1;
                 message = "Authentication failed, try again".to_string();
                 error_until = Some(Instant::now() + Duration::from_millis(error_delay_ms));
-                redraw_ui(&mut render_ui, &feedback, PromptState::Error, &message, start)?;
+                redraw_ui(&mut render_ui, &feedback, PromptState::Error, &message, start, animation_start)?;
             }
             KeyCode::Char(ch) => {
                 if ch.is_control() {
@@ -145,13 +147,13 @@ where
                 let mut buf = [0; 4];
                 password.extend_from_slice(ch.encode_utf8(&mut buf).as_bytes());
                 feedback.push(feedback_char);
-                redraw_ui(&mut render_ui, &feedback, prompt_state(error_until), &message, start)?;
+                redraw_ui(&mut render_ui, &feedback, prompt_state(error_until), &message, start, animation_start)?;
             }
             KeyCode::Backspace => {
                 if !password.is_empty() {
                     pop_last_utf8_char(&mut password);
                     feedback.pop();
-                    redraw_ui(&mut render_ui, &feedback, prompt_state(error_until), &message, start)?;
+                    redraw_ui(&mut render_ui, &feedback, prompt_state(error_until), &message, start, animation_start)?;
                 }
             }
             KeyCode::Esc => {
@@ -175,11 +177,12 @@ fn reserve_redraw_region<F>(
     feedback: &str,
     state: PromptState,
     message: &str,
+    animation_start: Instant,
 ) -> Result<(u16, u16), String>
 where
-    F: FnMut(&str, PromptState, &str) -> Result<String, String>,
+    F: FnMut(&str, PromptState, &str, u128) -> Result<String, String>,
 {
-    let rendered = render_ui(feedback, state, message)?;
+    let rendered = render_ui(feedback, state, message, animation_start.elapsed().as_millis())?;
     let lines = rendered_line_count(&rendered).max(1);
     let mut stdout = io::stdout();
 
@@ -204,11 +207,12 @@ fn redraw_ui<F>(
     state: PromptState,
     message: &str,
     start: (u16, u16),
+    animation_start: Instant,
 ) -> Result<(), String>
 where
-    F: FnMut(&str, PromptState, &str) -> Result<String, String>,
+    F: FnMut(&str, PromptState, &str, u128) -> Result<String, String>,
 {
-    let rendered = render_ui(feedback, state, message)?;
+    let rendered = render_ui(feedback, state, message, animation_start.elapsed().as_millis())?;
     let mut stdout = io::stdout();
 
     execute!(stdout, MoveTo(start.0, start.1), Clear(ClearType::FromCursorDown))

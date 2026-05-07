@@ -12,9 +12,15 @@ mode = "custom"
 feedback_char = "*"
 attempts = 3
 # How long the error template stays visible before returning to the normal prompt.
-error_delay_ms = 3000
+error_delay_ms = 900
 # How long the success template stays visible before the command runs.
 success_delay_ms = 700
+
+[animations]
+loading_bar = "animations/loading_bar.txt"
+
+[animation_speeds]
+loading_bar = 80
 
 [display]
 enabled = true

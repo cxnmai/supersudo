@@ -9,31 +9,42 @@ pub fn render_display(
     sudo_args: &[String],
     extra_vars: &HashMap<String, String>,
 ) -> Result<String, String> {
-    render_named_template(&config.display.template, config, sudo_args, extra_vars)
+    render_display_at(config, sudo_args, extra_vars, 0)
 }
 
-pub fn render_error_display(
+pub fn render_display_at(
     config: &Config,
     sudo_args: &[String],
     extra_vars: &HashMap<String, String>,
+    elapsed_ms: u128,
+) -> Result<String, String> {
+    render_named_template(&config.display.template, config, sudo_args, extra_vars, elapsed_ms)
+}
+
+pub fn render_error_display_at(
+    config: &Config,
+    sudo_args: &[String],
+    extra_vars: &HashMap<String, String>,
+    elapsed_ms: u128,
 ) -> Result<String, String> {
     let template = config
         .display
         .error_template
         .as_deref()
         .unwrap_or(&config.display.template);
-    render_named_template(template, config, sudo_args, extra_vars)
+    render_named_template(template, config, sudo_args, extra_vars, elapsed_ms)
 }
 
-pub fn render_success_display(
+pub fn render_success_display_at(
     config: &Config,
     sudo_args: &[String],
     extra_vars: &HashMap<String, String>,
+    elapsed_ms: u128,
 ) -> Result<Option<String>, String> {
     let Some(template) = config.display.success_template.as_deref() else {
         return Ok(None);
     };
-    render_named_template(template, config, sudo_args, extra_vars).map(Some)
+    render_named_template(template, config, sudo_args, extra_vars, elapsed_ms).map(Some)
 }
 
 pub fn render_authenticated_display(config: &Config, sudo_args: &[String]) -> Result<(), String> {
@@ -45,7 +56,7 @@ pub fn render_authenticated_display(config: &Config, sudo_args: &[String]) -> Re
         return Ok(());
     };
 
-    let rendered = render_named_template(template, config, sudo_args, &HashMap::new())?;
+    let rendered = render_named_template(template, config, sudo_args, &HashMap::new(), 0)?;
     write_rendered(&rendered)
 }
 
@@ -54,8 +65,10 @@ fn render_named_template(
     config: &Config,
     sudo_args: &[String],
     extra_vars: &HashMap<String, String>,
+    elapsed_ms: u128,
 ) -> Result<String, String> {
     let mut vars = template_vars(sudo_args);
+    vars.extend(animation_vars(config, elapsed_ms));
     vars.extend(extra_vars.clone());
     render_template(template, &config.styles, &vars)
 }
@@ -87,6 +100,22 @@ fn write_rendered(rendered: &str) -> Result<(), String> {
         .map_err(|err| format!("failed to flush display: {err}"))?;
 
     Ok(())
+}
+
+fn animation_vars(config: &Config, elapsed_ms: u128) -> HashMap<String, String> {
+    let mut vars = HashMap::new();
+    for (name, animation) in &config.loaded_animations {
+        let frame_index = if animation.speed_ms == 0 {
+            0
+        } else {
+            ((elapsed_ms / animation.speed_ms as u128) as usize) % animation.frames.len()
+        };
+        vars.insert(
+            format!("animation:{name}"),
+            animation.frames[frame_index].clone(),
+        );
+    }
+    vars
 }
 
 fn template_vars(sudo_args: &[String]) -> HashMap<String, String> {
@@ -180,6 +209,13 @@ fn render_value_token(
     token: &str,
     vars: &HashMap<String, String>,
 ) -> Result<Option<String>, String> {
+    if let Some((name, width)) = token.rsplit_once(":pad=") {
+        let width = parse_pad_width(token, width)?;
+        if let Some(value) = vars.get(name) {
+            return Ok(Some(pad_or_truncate(value, width)));
+        }
+    }
+
     if let Some(rest) = token.strip_prefix("lit:") {
         let Some((literal, width)) = rest.rsplit_once(":pad=") else {
             return Ok(Some(rest.to_string()));
@@ -188,17 +224,7 @@ fn render_value_token(
         return Ok(Some(pad_or_truncate(literal, width)));
     }
 
-    let Some((name, width)) = token.split_once(":pad=") else {
-        return Ok(vars.get(token).cloned());
-    };
-
-    let width = parse_pad_width(token, width)?;
-
-    let Some(value) = vars.get(name) else {
-        return Ok(None);
-    };
-
-    Ok(Some(pad_or_truncate(value, width)))
+    Ok(vars.get(token).cloned())
 }
 
 fn parse_pad_width(token: &str, width: &str) -> Result<usize, String> {

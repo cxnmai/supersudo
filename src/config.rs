@@ -21,6 +21,21 @@ pub struct Config {
 
     #[serde(default)]
     pub input: InputConfig,
+
+    #[serde(default)]
+    pub animations: HashMap<String, PathBuf>,
+
+    #[serde(default)]
+    pub animation_speeds: HashMap<String, u64>,
+
+    #[serde(skip)]
+    pub loaded_animations: HashMap<String, LoadedAnimation>,
+}
+
+#[derive(Debug, Clone)]
+pub struct LoadedAnimation {
+    pub frames: Vec<String>,
+    pub speed_ms: u64,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -127,11 +142,49 @@ fn load_required(path: PathBuf) -> Result<LoadedConfig, String> {
         .map_err(|err| format!("failed to parse config {}: {err}", path.display()))?;
 
     load_external_templates(&mut config, &path)?;
+    load_external_animations(&mut config, &path)?;
 
     Ok(LoadedConfig {
         config,
         path: Some(path),
     })
+}
+
+fn load_external_animations(config: &mut Config, config_path: &Path) -> Result<(), String> {
+    for (name, path) in &config.animations {
+        let contents = read_template_file(config_path, path, &format!("animations.{name}"))?;
+        let frames = parse_animation_frames(&contents);
+        if frames.is_empty() {
+            return Err(format!("animation `{name}` has no frames"));
+        }
+
+        config.loaded_animations.insert(
+            name.clone(),
+            LoadedAnimation {
+                frames,
+                speed_ms: config.animation_speeds.get(name).copied().unwrap_or(120),
+            },
+        );
+    }
+
+    Ok(())
+}
+
+fn parse_animation_frames(contents: &str) -> Vec<String> {
+    let delimiter = "\n---\n";
+    if contents.contains(delimiter) {
+        contents
+            .split(delimiter)
+            .map(|frame| frame.trim_matches('\n').to_string())
+            .filter(|frame| !frame.is_empty())
+            .collect()
+    } else {
+        contents
+            .lines()
+            .map(str::to_string)
+            .filter(|frame| !frame.is_empty())
+            .collect()
+    }
 }
 
 fn load_external_templates(config: &mut Config, config_path: &Path) -> Result<(), String> {

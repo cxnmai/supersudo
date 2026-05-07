@@ -53,15 +53,15 @@ fn main() {
                 }
             }
             Ok(false) => {
-                let render_password_ui = |password_feedback: &str, state: auth::PromptState, message: &str| {
+                let render_password_ui = |password_feedback: &str, state: auth::PromptState, message: &str, elapsed_ms: u128| {
                     let mut extra = std::collections::HashMap::new();
                     extra.insert("password".to_string(), password_feedback.to_string());
                     extra.insert("error".to_string(), message.to_string());
                     extra.insert("success".to_string(), message.to_string());
                     match state {
-                        auth::PromptState::Normal => render::render_display(&loaded_config.config, &display_args, &extra),
-                        auth::PromptState::Error => render::render_error_display(&loaded_config.config, &display_args, &extra),
-                        auth::PromptState::Success => render::render_success_display(&loaded_config.config, &display_args, &extra)
+                        auth::PromptState::Normal => render::render_display_at(&loaded_config.config, &display_args, &extra, elapsed_ms),
+                        auth::PromptState::Error => render::render_error_display_at(&loaded_config.config, &display_args, &extra, elapsed_ms),
+                        auth::PromptState::Success => render::render_success_display_at(&loaded_config.config, &display_args, &extra, elapsed_ms)
                             .map(|maybe| maybe.unwrap_or_default()),
                     }
                 };
