@@ -2,7 +2,7 @@
 
 `supersudo` is an experimental Rust wrapper around the user's existing `sudo` installation. It provides configurable terminal UI, live password feedback, prompt states, and animations while delegating authentication, sudoers policy, credential caching, and command execution to the system `sudo` binary.
 
-<img width="1076" height="900" alt="githubgif2" src="https://github.com/user-attachments/assets/0a9df2d2-0385-4109-b36d-04ac053729eb" />
+<img width="1076" height="900" alt="githubgif1" src="https://github.com/user-attachments/assets/0a9df2d2-0385-4109-b36d-04ac053729eb" />
 
 <img width="1076" height="900" alt="githubgif2" src="https://github.com/user-attachments/assets/1ff6bb13-bf9d-400b-ac40-672af860287b" />
 
